@@ -1,4 +1,4 @@
-name: ⚽ Football Bot
+name: Football Bot
 on:
   schedule:
     - cron: '0 */5 * * *'
