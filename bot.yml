@@ -1,0 +1,49 @@
+name: ⚽ Football Bot
+
+on:
+  # Запускаем каждые 5 часов автоматически
+  schedule:
+    - cron: '0 */5 * * *'
+  # Разрешаем запустить вручную через кнопку
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 295  # максимум 4ч55м, потом перезапуск
+
+    steps:
+      - name: 📥 Скачать код
+        uses: actions/checkout@v4
+
+      - name: 🐍 Установить Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Установить зависимости
+        run: pip install -r requirements.txt
+
+      - name: 💾 Загрузить базу данных (если есть)
+        uses: actions/download-artifact@v4
+        with:
+          name: football-db
+          path: .
+        continue-on-error: true  # Первый запуск — базы ещё нет, это нормально
+
+      - name: 🤖 Запустить бота
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GROUP_CHAT_ID: ${{ secrets.GROUP_CHAT_ID }}
+        run: |
+          # Запускаем бота на 4ч45м, потом сам завершится
+          timeout 17100 python bot.py || true
+
+      - name: 💾 Сохранить базу данных
+        if: always()  # Сохраняем даже если бот упал
+        uses: actions/upload-artifact@v4
+        with:
+          name: football-db
+          path: football.db
+          retention-days: 7
+          overwrite: true
