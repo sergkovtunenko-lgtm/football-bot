@@ -1,0 +1,27 @@
+{
+  "name": "friday-football-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": { "node": ">=22 <23" },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "migrate": "node dist/adapters/ydb/migrate.js"
+  },
+  "dependencies": {
+    "@ydbjs/auth": "6.3.1",
+    "@ydbjs/core": "6.3.1",
+    "@ydbjs/query": "6.3.0",
+    "luxon": "3.7.2"
+  },
+  "devDependencies": {
+    "@types/luxon": "3.7.2",
+    "@types/node": "22.20.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}
