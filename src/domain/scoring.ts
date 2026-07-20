@@ -12,7 +12,7 @@ export function awardsForWin(
   winOrdinal: bigint,
   members: readonly TeamMember[],
 ): WinAward[] {
-  return members.flatMap((member) => member.telegramUserId ? [{
+  return members.flatMap((member) => member.kind === 'player' && member.telegramUserId ? [{
     sessionId,
     winOrdinal,
     telegramUserId: member.telegramUserId,
@@ -21,6 +21,9 @@ export function awardsForWin(
 }
 
 export function lastReversibleWin(events: readonly WinEvent[]): WinEvent | undefined {
+  if (new Set(events.map((event) => event.sessionId)).size > 1) {
+    throw new Error('Win events must belong to one session');
+  }
   return events.filter((event) => !event.reversedAtIso)
     .sort((a, b) => (a.ordinal > b.ordinal ? -1 : 1))[0];
 }
@@ -58,7 +61,9 @@ export function buildLeaderboard(
     rows.set(award.telegramUserId, { displayName, wins: current.wins + 1 });
   }
   const sorted = [...rows].map(([telegramUserId, value]) => ({ telegramUserId, ...value }))
-    .sort((a, b) => b.wins - a.wins || a.displayName.localeCompare(b.displayName, 'ru'));
+    .sort((a, b) => b.wins - a.wins
+      || a.displayName.localeCompare(b.displayName, 'ru')
+      || a.telegramUserId.localeCompare(b.telegramUserId));
   const ranked: LeaderboardRow[] = [];
   for (const [index, row] of sorted.entries()) {
     const previous = ranked[index - 1];

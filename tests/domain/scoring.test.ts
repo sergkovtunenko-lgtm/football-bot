@@ -34,6 +34,18 @@ describe('awardsForWin', () => {
         { sessionId: '2026-07-24', winOrdinal: 1n, telegramUserId: '2', displayName: 'P2' },
       ]);
   });
+
+  it('excludes a guest even if corrupt data gives it a Telegram user ID', () => {
+    const guest: TeamMember = {
+      participantId: 'g', sessionId: '2026-07-24', ownerUserId: '9', telegramUserId: '9', displayName: 'Гость',
+      kind: 'guest', guestNumber: 1, queuePosition: 9n, rosterStatus: 'active',
+      teamNumber: 1, role: 'starter',
+    };
+
+    expect(awardsForWin('2026-07-24', 1n, [member('1'), guest])).toEqual([
+      { sessionId: '2026-07-24', winOrdinal: 1n, telegramUserId: '1', displayName: 'P1' },
+    ]);
+  });
 });
 
 describe('lastReversibleWin', () => {
@@ -45,6 +57,15 @@ describe('lastReversibleWin', () => {
     ];
 
     expect(lastReversibleWin(events)?.ordinal).toBe(3n);
+  });
+
+  it('rejects events from more than one session', () => {
+    const events: WinEvent[] = [
+      { sessionId: 'first', ordinal: 1n, teamNumber: 1, adminUserId: 'a', createdAtIso: 'x' },
+      { sessionId: 'second', ordinal: 2n, teamNumber: 1, adminUserId: 'a', createdAtIso: 'x' },
+    ];
+
+    expect(() => lastReversibleWin(events)).toThrow();
   });
 });
 
@@ -87,5 +108,18 @@ describe('buildLeaderboard', () => {
       { rank: 1, telegramUserId: '2', displayName: 'Борис', wins: 2 },
       { rank: 3, telegramUserId: '3', displayName: 'Виктор', wins: 1 },
     ]);
+  });
+
+  it('breaks same-name ties by Telegram user ID', () => {
+    const events: WinEvent[] = [
+      { sessionId: 'done', ordinal: 1n, teamNumber: 1, adminUserId: 'a', createdAtIso: 'x' },
+    ];
+    const awards: WinAward[] = [
+      { sessionId: 'done', winOrdinal: 1n, telegramUserId: '9', displayName: 'Одинаковый' },
+      { sessionId: 'done', winOrdinal: 1n, telegramUserId: '1', displayName: 'Одинаковый' },
+    ];
+
+    expect(buildLeaderboard(events, awards, new Set(['done']), new Map()))
+      .toMatchObject([{ telegramUserId: '1' }, { telegramUserId: '9' }]);
   });
 });
