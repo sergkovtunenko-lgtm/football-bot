@@ -17,7 +17,7 @@ export function shuffled<T>(values: readonly T[], random: RandomSource): T[] {
 }
 
 export function formTeams(participants: readonly Participant[], random: RandomSource): TeamFormation {
-  const active = shuffled(participants.filter((participant) => participant.rosterStatus === 'active'), random).slice(0, 20);
+  const active = shuffled(participants.filter((participant) => participant.rosterStatus === 'active').slice(0, 20), random);
   const teamCount = Math.min(4, Math.floor(active.length / 5));
   if (teamCount < 2) return { teams: [], members: [] };
 

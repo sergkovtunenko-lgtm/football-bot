@@ -37,6 +37,13 @@ describe('formTeams', () => {
     expect(formTeams(list, zeroRandom).members.some((m) => m.participantId === 'wait')).toBe(false);
   });
 
+  it.each([21, 22, 23, 24, 25])('uses exactly the first 20 eligible participants for %i active inputs', (count) => {
+    const result = formTeams(participants(count), zeroRandom);
+    expect(new Set(result.members.map((member) => member.participantId))).toEqual(
+      new Set(participants(20).map((participant) => participant.participantId)),
+    );
+  });
+
   it('maintains formation invariants for 50 deterministic shuffle sequences', () => {
     for (let seed = 0; seed < 50; seed += 1) {
       let state = seed + 1;
