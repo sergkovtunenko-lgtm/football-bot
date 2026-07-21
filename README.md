@@ -21,6 +21,32 @@ Telegram-бот открывает запись на пятничный футб
 
 В BotFather выполните `/setprivacy`, выберите бота и нажмите **Disable**. Это необходимо только для распознавания групповых текстов `+`, `+1`, `+2`, `-`, `-1`, `-2`. Inline-кнопки работают независимо от режима privacy.
 
+## Проверка перед развёртыванием
+
+Основной quality gate выполняется так:
+
+```powershell
+npm.cmd ci
+npm.cmd test
+npm.cmd run test:coverage
+npm.cmd run typecheck
+npm.cmd run build
+```
+
+Порог покрытия относится к детерминированному ядру: конфигурации, безопасному логированию и редактированию секретов, доменным правилам, прикладным сценариям и Telegram-рендерингу. Он намеренно не выдаёт внешний I/O за unit-покрытие: YDB-адаптер, сетевой Telegram-клиент, обработчик Cloud Function и deploy/webhook-скрипты проверяются отдельными контрактными тестами и боевыми пробами.
+
+```powershell
+npm.cmd test -- tests/handler.test.ts tests/telegram/client.test.ts tests/scripts/deploy.test.ts tests/scripts/set-webhook.test.ts
+
+# Для отдельной локальной/тестовой YDB, которую разрешено очищать:
+$env:YDB_TEST_CONNECTION_STRING = 'grpc://localhost:2136/local'
+$env:YDB_ANONYMOUS_CREDENTIALS = '1'
+npm.cmd test -- tests/integration/ydb-store.test.ts
+Remove-Item Env:YDB_TEST_CONNECTION_STRING, Env:YDB_ANONYMOUS_CREDENTIALS
+```
+
+Финальная проверка реального entrypoint выполняется `./scripts/deploy.ps1`: до переключения `stable` скрипт применяет миграцию и проверяет candidate-запросами ответы 403 с неверным секретом и 200 с верным.
+
 ## Развёртывание
 
 Откройте PowerShell в корне репозитория и задайте секреты только для текущего процесса:

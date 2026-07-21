@@ -31,4 +31,10 @@ describe('loadConfig', () => {
       'Invalid WEBHOOK_SECRET',
     );
   });
+
+  it('rejects non-numeric administrator IDs', () => {
+    expect(() => loadConfig({ ...valid, ADMIN_IDS: '111,not-a-number' })).toThrow(
+      'Invalid ADMIN_IDS',
+    );
+  });
 });

@@ -37,6 +37,12 @@ describe('formTeams', () => {
     expect(formTeams(list, zeroRandom).members.some((m) => m.participantId === 'wait')).toBe(false);
   });
 
+  it('rejects a random source index outside the shuffle range', () => {
+    expect(() => formTeams(participants(10), { int: () => -1 })).toThrow(
+      'RandomSource returned an invalid index',
+    );
+  });
+
   it.each([21, 22, 23, 24, 25])('uses exactly the first 20 eligible participants for %i active inputs', (count) => {
     const result = formTeams(participants(count), zeroRandom);
     expect(new Set(result.members.map((member) => member.participantId))).toEqual(

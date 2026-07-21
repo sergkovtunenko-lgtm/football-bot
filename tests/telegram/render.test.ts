@@ -49,6 +49,24 @@ describe('Telegram rendering', () => {
     expect(renderTeams({ sessionId: '2026-07-24', teams: [] })).toContain('Недостаточно для двух команд');
   });
 
+  it('renders empty and completed states without placeholder artifacts', () => {
+    const teams = renderTeams({
+      sessionId: '2026-07-24',
+      teams: [{ teamNumber: 1, starters: [], reserves: [] }],
+    });
+    expect(teams).not.toContain('Командный резерв:');
+
+    const score = renderScorePanel({ sessionId: '2026-07-24', teams: [], finished: true });
+    expect(score).toContain('Итоговый счёт');
+    expect(score).toContain('Нет сформированных команд');
+
+    const daily = renderDailyResults({ sessionId: '2026-07-24', teams: [], rows: [] });
+    expect(daily).toContain('Нет сформированных команд');
+    expect(daily).toContain('Победы игроков сегодня</b>\n—');
+
+    expect(renderLeaderboard([])).toContain('Пока нет завершённых игр.');
+  });
+
   it('renders the remaining approved branded views with escaped names', () => {
     const registration = { sessionId: '2026-07-24', active: [{ displayName: 'Анна & <Иван>' }], waitlist: [], maxActive: 20 } as const;
     expect(renderReminder(registration)).toContain('Анна &amp; &lt;Иван&gt;');

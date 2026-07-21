@@ -35,4 +35,16 @@ describe('structured logger', () => {
     });
     expect(line).not.toContain('must-not-leak');
   });
+
+  it('redacts sensitive fields nested inside arrays', () => {
+    const write = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    logInfo('batch', { attempts: [{ authorization: 'Bearer must-not-leak', number: 1 }] });
+
+    const line = String(write.mock.calls[0]?.[0]);
+    expect(JSON.parse(line)).toMatchObject({
+      attempts: [{ authorization: '[REDACTED]', number: 1 }],
+    });
+    expect(line).not.toContain('must-not-leak');
+  });
 });
