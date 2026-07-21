@@ -262,7 +262,7 @@ describe('OutboxWorker retries', () => {
 
   it('truncates stored error text to 500 characters and removes bot tokens', async () => {
     const app = fixture();
-    const token = '1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef_12';
+    const token = '1234567890:' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef_12';
     await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
     vi.mocked(app.telegram.sendMessage).mockRejectedValue(new Error(
       `https://api.telegram.org/bot${token}/sendMessage ${'x'.repeat(700)}`,

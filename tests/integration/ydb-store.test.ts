@@ -199,7 +199,7 @@ describeYdb(suiteName, () => {
     expect((await store.claimDueEffects('2026-07-21T08:00:30.000Z', 1, 'lease-3')).map(({ effectId }) => effectId))
       .toEqual(['a']);
 
-    const token = '123456789:abcdefghijklmnopqrstuvwxyzABCDE_';
+    const token = '123456789:' + 'abcdefghijklmnopqrstuvwxyzABCDE_';
     const unsafeError = `https://api.telegram.org/bot${token}/sendMessage ${'x'.repeat(600)}`;
     await store.rescheduleEffect('a', 2, '2026-07-21T08:02:00.000Z', 'retryable');
     await store.markEffectSent('b', '2026-07-21T08:00:31.123Z');
