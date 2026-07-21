@@ -1,0 +1,78 @@
+import { describe, expect, it, vi } from 'vitest';
+import { TelegramApiError, TelegramClient } from '../../src/adapters/telegram/client';
+
+const ok = (result: unknown) => new Response(JSON.stringify({ ok: true, result }), { status: 200 });
+
+describe('TelegramClient', () => {
+  it('sends HTML messages as POST JSON and converts the numeric message ID to a string', async () => {
+    const fetcher = vi.fn().mockResolvedValue(ok({ message_id: 7 }));
+    const client = new TelegramClient('secret-token', fetcher, vi.fn().mockResolvedValue(undefined));
+
+    await expect(client.sendMessage('-100', '<b>text</b>')).resolves.toEqual({ messageId: '7' });
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://api.telegram.org/botsecret-token/sendMessage',
+      expect.objectContaining({ method: 'POST', headers: { 'content-type': 'application/json' } }),
+    );
+    expect(JSON.parse(fetcher.mock.calls[0]![1].body as string)).toEqual({ chat_id: '-100', text: '<b>text</b>', parse_mode: 'HTML' });
+  });
+
+  it('honors Telegram retry_after', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, error_code: 429, parameters: { retry_after: 2 } }), { status: 429 }))
+      .mockResolvedValueOnce(ok({ message_id: 7 }));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const client = new TelegramClient('secret-token', fetcher, sleep);
+
+    await expect(client.sendMessage('-100', 'text')).resolves.toEqual({ messageId: '7' });
+    expect(sleep).toHaveBeenCalledWith(2000);
+  });
+
+  it('retries a 5xx with bounded exponential backoff', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, description: 'bad gateway' }), { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, description: 'unavailable' }), { status: 503 }))
+      .mockResolvedValueOnce(ok({ message_id: 7 }));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await new TelegramClient('secret-token', fetcher, sleep).sendMessage('-100', 'text');
+    expect(sleep.mock.calls).toEqual([[250], [500]]);
+  });
+
+  it('does not retry a non-rate-limit 4xx and never includes the token in its error', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, description: 'chat not found' }), { status: 400 }));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const client = new TelegramClient('secret-token', fetcher, sleep);
+
+    const request = client.sendMessage('-100', 'text');
+    await expect(request).rejects.toMatchObject({ method: 'sendMessage', status: 400 } satisfies Partial<TelegramApiError>);
+    await request.catch((error: unknown) => expect(String(error)).not.toContain('secret-token'));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a malformed 4xx response as a retryable network error', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('not json', { status: 400 }));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(new TelegramClient('secret-token', fetcher, sleep).sendMessage('-100', 'text'))
+      .rejects.toMatchObject({ method: 'sendMessage', status: 400 } satisfies Partial<TelegramApiError>);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('redacts the token even when Telegram returns it in an error description', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: false, description: 'request for secret-token was rejected',
+    }), { status: 400 }));
+    const client = new TelegramClient('secret-token', fetcher, vi.fn().mockResolvedValue(undefined));
+
+    await client.sendMessage('-100', 'text').catch((error: unknown) => expect(String(error)).not.toContain('secret-token'));
+  });
+
+  it('passes an eight-second abort signal to fetch', async () => {
+    const fetcher = vi.fn().mockResolvedValue(ok({ message_id: 7 }));
+    await new TelegramClient('secret-token', fetcher, vi.fn().mockResolvedValue(undefined)).sendMessage('-100', 'text');
+    const request = fetcher.mock.calls[0]![1];
+    expect(request.signal).toBeInstanceOf(AbortSignal);
+  });
+});
