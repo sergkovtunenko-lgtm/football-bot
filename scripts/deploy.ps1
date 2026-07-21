@@ -12,6 +12,7 @@ $TriggerName = 'friday-football-bot-every-minute'
 $CronExpression = '* * * * ? *'
 $TriggerPayload = 'tick'
 $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'deploy-helpers.ps1')
 
 function Require-EnvironmentValue {
     param([Parameter(Mandatory)][string] $Name)
@@ -139,18 +140,24 @@ function Invoke-WebhookProbe {
 $BotToken = Require-EnvironmentValue 'BOT_TOKEN'
 $WebhookSecret = Require-EnvironmentValue 'WEBHOOK_SECRET'
 $AdminIds = Require-EnvironmentValue 'ADMIN_IDS'
+if ($BotToken -notmatch '^\d{8,12}:[A-Za-z0-9_-]{30,}$') {
+    throw 'BOT_TOKEN must be a valid token newly issued by BotFather.'
+}
 if ($WebhookSecret -notmatch '^[A-Za-z0-9_-]{16,256}$') {
     throw 'WEBHOOK_SECRET must contain 16-256 letters, digits, underscores, or hyphens.'
 }
 if ($AdminIds -notmatch '^-?\d+(,-?\d+)*$') {
     throw 'ADMIN_IDS must be a comma-separated list of numeric Telegram user IDs.'
 }
+$RuntimeAdminIds = ConvertTo-RuntimeAdminIds $AdminIds
 
 $FolderId = Invoke-YcText @('config', 'get', 'folder-id') 'Folder configuration lookup'
 if ([string]::IsNullOrWhiteSpace($FolderId)) {
     throw 'yc has no active folder-id.'
 }
 
+$PreviousStableVersionId = $null
+$StableMoved = $false
 Push-Location -LiteralPath $RepositoryRoot
 try {
     $ServiceAccount = Get-YcJsonOrNull @('iam', 'service-account', 'get', '--name', $ServiceAccountName, '--format', 'json') 'Service account lookup'
@@ -163,8 +170,13 @@ try {
     $Database = Get-YcJsonOrNull @('ydb', 'database', 'get', $DatabaseName, '--format', 'json') 'YDB database lookup'
     if ($null -eq $Database) {
         Invoke-YcQuiet @('ydb', 'database', 'create', $DatabaseName, '--serverless', '--sls-provisioned-rcu', '0', '--sls-storage-size', '1GB', '--deletion-protection') 'YDB database creation'
-        $Database = Get-YcJsonOrNull @('ydb', 'database', 'get', $DatabaseName, '--format', 'json') 'Created YDB database lookup'
     }
+    Invoke-YcQuiet @('ydb', 'database', 'update', $DatabaseName, '--serverless', '--sls-provisioned-rcu', '0', '--sls-storage-size', '1GB', '--deletion-protection') 'YDB database convergence'
+    $Database = Get-YcJsonOrNull @('ydb', 'database', 'get', $DatabaseName, '--format', 'json') 'Converged YDB database lookup'
+    if ($null -eq $Database) {
+        throw 'The YDB database disappeared after configuration update.'
+    }
+    Assert-YdbDatabaseConfiguration $Database
     $YdbConnectionString = [string]$Database.endpoint
     if ([string]::IsNullOrWhiteSpace($YdbConnectionString)) {
         throw 'The YDB database did not return an endpoint.'
@@ -210,7 +222,7 @@ try {
     $PreviousStable = Get-YcJsonOrNull @('serverless', 'function', 'version', 'get-by-tag', '--function-name', $FunctionName, '--tag', 'stable', '--format', 'json') 'Stable version lookup'
     $PreviousStableVersionId = if ($null -eq $PreviousStable) { $null } else { [string]$PreviousStable.id }
 
-    $Environment = "BOT_TOKEN=$BotToken,WEBHOOK_SECRET=$WebhookSecret,ADMIN_IDS=$AdminIds,YDB_CONNECTION_STRING=$YdbConnectionString,YDB_METADATA_CREDENTIALS=1"
+    $Environment = "BOT_TOKEN=$BotToken,WEBHOOK_SECRET=$WebhookSecret,ADMIN_IDS=$RuntimeAdminIds,YDB_CONNECTION_STRING=$YdbConnectionString,YDB_METADATA_CREDENTIALS=1"
     $PreviousErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
@@ -261,7 +273,15 @@ try {
     Invoke-WebhookProbe $CandidateUrl $WrongSecret 403
     Invoke-WebhookProbe $CandidateUrl $WebhookSecret 200
 
+    if (-not [string]::IsNullOrWhiteSpace($PreviousStableVersionId)) {
+        Write-Output "Previous stable version ID: $PreviousStableVersionId"
+        Write-Output "Rollback: yc serverless function version set-tag --id $PreviousStableVersionId --tag stable"
+    }
+    else {
+        Write-Output 'Previous stable version: none (first deployment); rollback tag is unavailable.'
+    }
     Invoke-YcQuiet @('serverless', 'function', 'version', 'set-tag', '--id', $NewVersionId, '--tag', 'stable') 'Stable tag update'
+    $StableMoved = $true
     Invoke-YcQuiet @('serverless', 'function', 'add-access-binding', $FunctionName, '--role', 'functions.functionInvoker', '--service-account-id', $ServiceAccountId) 'Private timer invocation binding'
 
     $Trigger = Get-YcJsonOrNull @('serverless', 'trigger', 'get', $TriggerName, '--format', 'json') 'Timer trigger lookup'
@@ -285,6 +305,18 @@ try {
         Write-Output "Rollback: yc serverless function version set-tag --id $PreviousStableVersionId --tag stable"
     }
     Write-Output 'Next manual action: /setup'
+}
+catch {
+    if ($StableMoved) {
+        if (-not [string]::IsNullOrWhiteSpace($PreviousStableVersionId)) {
+            Write-Output "Previous stable version ID: $PreviousStableVersionId"
+            Write-Output "Rollback: yc serverless function version set-tag --id $PreviousStableVersionId --tag stable"
+        }
+        else {
+            Write-Output 'Previous stable version: none (first deployment); rollback tag is unavailable.'
+        }
+    }
+    throw
 }
 finally {
     Pop-Location

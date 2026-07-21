@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
 
 // @ts-expect-error The production utility intentionally ships as native ESM.
 import { getWebhookInfo, setWebhook } from '../../scripts/set-webhook.mjs';
@@ -49,6 +51,45 @@ describe('setWebhook', () => {
 
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).not.toContain(input.botToken);
+  });
+
+  it('wraps a rejected transport error without exposing its token URL', async () => {
+    const rawUrl = `https://api.telegram.org/bot${input.botToken}/setWebhook`;
+    const fetcher = vi.fn().mockRejectedValue(new Error(`connect failed: ${rawUrl}`));
+
+    let thrown: unknown;
+    try {
+      await setWebhook(fetcher, input);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe('Telegram transport request failed');
+    expect((thrown as Error).message).not.toContain(input.botToken);
+    expect((thrown as Error).message).not.toContain(rawUrl);
+  });
+
+  it('prints only the fixed transport error when run as a script', () => {
+    const rawUrl = `https://api.telegram.org/bot${input.botToken}/setWebhook`;
+    const preload = `globalThis.fetch = async () => { throw new Error(${JSON.stringify(rawUrl)}) }`;
+    const result = spawnSync(process.execPath, [
+      '--import', `data:text/javascript,${encodeURIComponent(preload)}`,
+      resolve(__dirname, '../../scripts/set-webhook.mjs'),
+    ], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        BOT_TOKEN: input.botToken,
+        WEBHOOK_SECRET: input.webhookSecret,
+        FUNCTION_URL: input.functionUrl,
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Telegram transport request failed');
+    expect(result.stderr).not.toContain(input.botToken);
+    expect(result.stderr).not.toContain(rawUrl);
   });
 });
 

@@ -4,7 +4,7 @@ const TOKEN_PATTERN = /^\d{8,12}:[A-Za-z0-9_-]{30,}$/;
 const SECRET_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
 
 export async function setWebhook(fetcher, input) {
-  const response = await fetcher(methodUrl(input.botToken, 'setWebhook'), {
+  const response = await fetchSafely(fetcher, methodUrl(input.botToken, 'setWebhook'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -21,7 +21,11 @@ export async function setWebhook(fetcher, input) {
 }
 
 export async function getWebhookInfo(fetcher, input) {
-  const response = await fetcher(methodUrl(input.botToken, 'getWebhookInfo'), { method: 'GET' });
+  const response = await fetchSafely(
+    fetcher,
+    methodUrl(input.botToken, 'getWebhookInfo'),
+    { method: 'GET' },
+  );
   const payload = await readPayload(response);
   const result = payload.result;
   if (
@@ -71,6 +75,14 @@ export async function main() {
 
 function methodUrl(token, method) {
   return `https://api.telegram.org/bot${token}/${method}`;
+}
+
+async function fetchSafely(fetcher, url, init) {
+  try {
+    return await fetcher(url, init);
+  } catch {
+    throw new Error('Telegram transport request failed');
+  }
 }
 
 function required(env, name) {

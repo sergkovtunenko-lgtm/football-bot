@@ -18,7 +18,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!/^[A-Za-z0-9_-]{16,256}$/.test(webhookSecret)) {
     throw new Error('Invalid WEBHOOK_SECRET');
   }
-  const adminIds = new Set(required(env, 'ADMIN_IDS').split(',').map((id) => id.trim()));
+  const adminIds = new Set(required(env, 'ADMIN_IDS').split(/[;,]/).map((id) => id.trim()));
   if ([...adminIds].some((id) => !/^-?\d+$/.test(id))) throw new Error('Invalid ADMIN_IDS');
   return {
     botToken: required(env, 'BOT_TOKEN'),

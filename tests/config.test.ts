@@ -13,6 +13,10 @@ describe('loadConfig', () => {
     expect(loadConfig(valid).adminIds).toEqual(new Set(['111', '222']));
   });
 
+  it('accepts semicolon-separated admin IDs from the deployment environment map', () => {
+    expect(loadConfig({ ...valid, ADMIN_IDS: '111;222' }).adminIds).toEqual(new Set(['111', '222']));
+  });
+
   it.each(['BOT_TOKEN', 'WEBHOOK_SECRET', 'ADMIN_IDS', 'YDB_CONNECTION_STRING'])(
     'rejects a missing %s',
     (key) => {
