@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS team_members (
   session_id Utf8 NOT NULL,
   team_number Uint8 NOT NULL,
   participant_id Utf8 NOT NULL,
+  owner_user_id Utf8 NOT NULL,
+  telegram_user_id Utf8,
+  display_name Utf8 NOT NULL,
+  kind Utf8 NOT NULL,
+  guest_number Uint8,
+  queue_position Uint64 NOT NULL,
+  roster_status Utf8 NOT NULL,
   role Utf8 NOT NULL,
   PRIMARY KEY (session_id, team_number, participant_id)
 );

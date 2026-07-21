@@ -134,6 +134,22 @@ describeYdb(suiteName, () => {
     expect(await store.transact((tx) => tx.listTeamMembers('s'))).toEqual([roster[0]]);
   });
 
+  it('keeps the closed team roster snapshot when registration participants change', async () => {
+    const roster = participants('snapshot', 2).map((participant, index) => ({
+      ...participant,
+      teamNumber: 1 as const,
+      role: index === 0 ? 'starter' as const : 'reserve' as const,
+    }));
+    await store.transact(async (tx) => {
+      await tx.replaceParticipants('snapshot', roster);
+      await tx.replaceTeams('snapshot', [{ sessionId: 'snapshot', teamNumber: 1 }], roster);
+    });
+
+    await store.transact((tx) => tx.replaceParticipants('snapshot', []));
+
+    expect(await store.transact((tx) => tx.listTeamMembers('snapshot'))).toEqual(roster);
+  });
+
   it('enforces unique win awards and reverses a win without deleting history', async () => {
     const event = {
       sessionId: 's', ordinal: 1n, teamNumber: 2 as const, adminUserId: 'admin',

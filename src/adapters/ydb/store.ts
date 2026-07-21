@@ -271,14 +271,12 @@ class YdbFootballTransaction implements FootballTransaction {
 
   async listTeamMembers(sessionId: string): Promise<TeamMember[]> {
     const [rows] = await this.tx<[TeamMemberRow]>`
-      SELECT p.session_id, p.participant_id, p.owner_user_id, p.telegram_user_id,
-             p.display_name, p.kind, p.guest_number, p.queue_position, p.roster_status,
-             m.team_number, m.role
-      FROM team_members AS m
-      INNER JOIN participants AS p
-        ON p.session_id = m.session_id AND p.participant_id = m.participant_id
-      WHERE m.session_id = ${sessionId}
-      ORDER BY m.team_number, p.queue_position, p.participant_id
+      SELECT session_id, participant_id, owner_user_id, telegram_user_id,
+             display_name, kind, guest_number, queue_position, roster_status,
+             team_number, role
+      FROM team_members
+      WHERE session_id = ${sessionId}
+      ORDER BY team_number, queue_position, participant_id
     `;
     return rows.map((row) => ({
       ...participantFromRow(row),
@@ -301,10 +299,16 @@ class YdbFootballTransaction implements FootballTransaction {
     const activeMembers = members.filter((member) => member.rosterStatus === 'active').slice(0, 20);
     if (activeMembers.length > 0) {
       const memberRows = activeMembers.map((member) => fragment`(
-        ${sessionId}, ${new Uint8(member.teamNumber)}, ${member.participantId}, ${member.role}
+        ${sessionId}, ${new Uint8(member.teamNumber)}, ${member.participantId}, ${member.ownerUserId},
+        ${nullable(member.telegramUserId)}, ${member.displayName}, ${member.kind},
+        ${nullableUint8(member.guestNumber)}, ${new Uint64(member.queuePosition)},
+        ${member.rosterStatus}, ${member.role}
       )`);
       await this.tx`
-        INSERT INTO team_members (session_id, team_number, participant_id, role)
+        INSERT INTO team_members (
+          session_id, team_number, participant_id, owner_user_id, telegram_user_id,
+          display_name, kind, guest_number, queue_position, roster_status, role
+        )
         VALUES ${join(memberRows, ', ')}
       `;
     }
