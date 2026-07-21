@@ -8,6 +8,7 @@ export type TelegramEffect =
   | { kind: 'score_panel'; sessionId: string }
   | { kind: 'final_results'; sessionId: string }
   | { kind: 'admin_error'; correlationId: string; summary: string };
+export type AdminErrorEffect = Extract<TelegramEffect, { kind: 'admin_error' }>;
 
 export interface StoredEffect {
   effectId: string;
@@ -49,6 +50,15 @@ export interface FootballStore {
   claimDueEffects(nowIso: string, limit: number, leaseId: string): Promise<StoredEffect[]>;
   markEffectSent(effectId: string, sentAtIso: string): Promise<void>;
   rescheduleEffect(effectId: string, attempts: number, nextAttemptAtIso: string, safeError: string): Promise<void>;
+  rescheduleEffectWithNotice(
+    effectId: string,
+    attempts: number,
+    nextAttemptAtIso: string,
+    safeError: string,
+    noticeEffectId: string,
+    notice: AdminErrorEffect,
+    noticeAtIso: string,
+  ): Promise<void>;
   markEffectPermanentlyFailed(effectId: string, failedAtIso: string, safeError: string): Promise<void>;
   getOperationalStatus(): Promise<OperationalStatus>;
 }

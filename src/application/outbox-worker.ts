@@ -1,7 +1,6 @@
 import type { Clock } from '../ports/clock';
 import type { FootballStore, FootballTransaction, StoredEffect, TelegramEffect } from '../ports/store';
-import type { InlineKeyboard, TelegramPort } from '../ports/telegram';
-import { TelegramApiError } from '../adapters/telegram/client';
+import { TelegramError, type InlineKeyboard, type TelegramPort } from '../ports/telegram';
 import {
   escapeHtml,
   registrationKeyboard,
@@ -18,10 +17,10 @@ import { buildLeaderboard, dailyPlayerWins } from '../domain/scoring';
 import type { Session, WinEvent } from '../domain/model';
 import { logError } from '../logger';
 import type { DailyResultsView, RegistrationView, ScoreView, TeamsView } from './views';
+import { redactTelegramTokens } from '../security/redact';
 
 const MAX_FLUSH_LIMIT = 10;
 const SAFE_ERROR_LIMIT = 500;
-const TOKEN_PATTERN = /\b[0-9]{8,12}:[A-Za-z0-9_-]{30,}\b/g;
 const BACKOFF_SECONDS = [30, 120, 600, 3600] as const;
 
 type MessageSlot = 'registrationMessageId' | 'scoreMessageId';
@@ -116,7 +115,11 @@ export class OutboxWorker {
     const backoff = BACKOFF_SECONDS[Math.min(stored.attempts, BACKOFF_SECONDS.length - 1)]!;
     const delaySeconds = Math.max(backoff, retryAfter ?? 0);
     if (attempts === 4 && stored.effect.kind !== 'admin_error') {
-      await this.store.transact((tx) => tx.enqueue(
+      await this.store.rescheduleEffectWithNotice(
+        stored.effectId,
+        attempts,
+        new Date(now.getTime() + delaySeconds * 1000).toISOString(),
+        errorText,
         `admin-error:${stored.effectId}`,
         {
           kind: 'admin_error',
@@ -124,7 +127,8 @@ export class OutboxWorker {
           summary: 'Не удалось доставить служебное сообщение после нескольких попыток.',
         },
         now.toISOString(),
-      ));
+      );
+      return 'rescheduled';
     }
     await this.store.rescheduleEffect(
       stored.effectId,
@@ -297,13 +301,13 @@ function activeWins(events: readonly WinEvent[], teamNumber: 1 | 2 | 3 | 4, sess
 }
 
 function isMessageNotModified(error: unknown): boolean {
-  return error instanceof TelegramApiError
+  return error instanceof TelegramError
     && error.status === 400
     && error.description.toLowerCase().includes('message is not modified');
 }
 
 function isPermanentTelegramFailure(error: unknown): boolean {
-  return error instanceof TelegramApiError
+  return error instanceof TelegramError
     && error.status !== undefined
     && error.status >= 400
     && error.status < 500
@@ -311,8 +315,8 @@ function isPermanentTelegramFailure(error: unknown): boolean {
 }
 
 function telegramRetryAfterSeconds(error: unknown): number | undefined {
-  if (!(error instanceof TelegramApiError) || error.status !== 429) return undefined;
-  const property = (error as TelegramApiError & { retryAfterSeconds?: unknown }).retryAfterSeconds;
+  if (!(error instanceof TelegramError) || error.status !== 429) return undefined;
+  const property = error.retryAfterSeconds;
   if (typeof property === 'number' && Number.isFinite(property) && property >= 0) return property;
   const match = /retry after\s+(\d+)/i.exec(error.description);
   return match?.[1] === undefined ? undefined : Number(match[1]);
@@ -320,5 +324,5 @@ function telegramRetryAfterSeconds(error: unknown): number | undefined {
 
 function safeError(error: unknown): string {
   const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-  return raw.replace(TOKEN_PATTERN, '[redacted]').slice(0, SAFE_ERROR_LIMIT);
+  return redactTelegramTokens(raw).slice(0, SAFE_ERROR_LIMIT);
 }

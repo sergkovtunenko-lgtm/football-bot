@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TelegramApiError, TelegramClient } from '../../src/adapters/telegram/client';
+import { TelegramError } from '../../src/ports/telegram';
 
 const ok = (result: unknown) => new Response(JSON.stringify({ ok: true, result }), { status: 200 });
 
@@ -48,6 +49,14 @@ describe('TelegramClient', () => {
     await request.catch((error: unknown) => expect(String(error)).not.toContain('secret-token'));
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('reports delivery failures through the Telegram port error contract', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: false, description: 'chat not found',
+    }), { status: 400 }));
+    const request = new TelegramClient('secret-token', fetcher, vi.fn()).sendMessage('-100', 'text');
+    await expect(request).rejects.toBeInstanceOf(TelegramError);
   });
 
   it('does not treat a malformed 4xx response as a retryable network error', async () => {

@@ -266,13 +266,63 @@ describe('UpdateRouter recovery commands and validation', () => {
     expect(telegram.sendMessage).toHaveBeenCalledWith('-1001', 'Только администратор');
   });
 
-  it('does not run /setup outside a group or supergroup', async () => {
+  it.each(['/status', '/open', '/close', '/undo', '/finish'])('ignores %s outside the configured group before admin checks', async (command) => {
+    const { router, service, telegram } = fixture();
+    const update = message(command) as any;
+    update.message.chat.id = -2002;
+    await router.handle(update);
+    expect(service.status).not.toHaveBeenCalled();
+    expect(service.openNow).not.toHaveBeenCalled();
+    expect(service.closeNow).not.toHaveBeenCalled();
+    expect(service.undoLastWin).not.toHaveBeenCalled();
+    expect(telegram.sendMessage).not.toHaveBeenCalled();
+    expect(telegram.editMessage).not.toHaveBeenCalled();
+  });
+
+  it('/setup bootstraps a different group for an admin', async () => {
     const { router, service } = fixture();
+    const update = message('/setup') as any;
+    update.message.from.id = 900;
+    update.message.chat.id = -2002;
+    await router.handle(update);
+    expect(service.setup).toHaveBeenCalledWith('77', '900', '-2002');
+  });
+
+  it('ignores a recovery command from a private chat', async () => {
+    const { router, service, telegram } = fixture();
+    const update = message('/status') as any;
+    update.message.from.id = 900;
+    update.message.chat.type = 'private';
+    await router.handle(update);
+    expect(service.status).not.toHaveBeenCalled();
+    expect(telegram.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not run /setup outside a group or supergroup', async () => {
+    const { router, service, telegram } = fixture();
     const update = message('/setup') as any;
     update.message.from.id = 900;
     update.message.chat.type = 'private';
     await router.handle(update);
     expect(service.setup).not.toHaveBeenCalled();
+    expect(telegram.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['update_id', (u: any) => { u.update_id = Number.MAX_SAFE_INTEGER + 1; }],
+    ['from.id', (u: any) => { u.callback_query.from.id = Number.MAX_SAFE_INTEGER + 1; }],
+    ['chat.id', (u: any) => { u.callback_query.message.chat.id = Number.MAX_SAFE_INTEGER + 1; }],
+    ['message_id', (u: any) => { u.callback_query.message.message_id = Number.MAX_SAFE_INTEGER + 1; }],
+  ])('answers an invalid callback exactly once when %s is unsafe', async (_field, mutate) => {
+    const { router, service, telegram } = fixture();
+    const update = callback('v1:w:2') as any;
+    mutate(update);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await router.handle(update);
+    expect(service.recordWin).not.toHaveBeenCalled();
+    expect(telegram.answerCallback).toHaveBeenCalledOnce();
+    expect(telegram.answerCallback).toHaveBeenCalledWith('cq', 'Некорректное действие', true);
+    logged.mockRestore();
   });
 
   it.each([

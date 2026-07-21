@@ -3,7 +3,7 @@ import { OutboxWorker } from '../../src/application/outbox-worker';
 import { TelegramApiError } from '../../src/adapters/telegram/client';
 import type { Session } from '../../src/domain/model';
 import type { StoredEffect, TelegramEffect } from '../../src/ports/store';
-import type { TelegramPort } from '../../src/ports/telegram';
+import { TelegramError, type TelegramPort } from '../../src/ports/telegram';
 import { InMemoryFootballStore } from '../support/in-memory-store';
 
 const NOW = '2026-07-21T08:00:00.000Z';
@@ -18,9 +18,10 @@ function fixture() {
     pinMessage: vi.fn().mockResolvedValue(undefined),
   };
   let id = 0;
-  const clock = { now: () => new Date(NOW) };
+  let now = new Date(NOW);
+  const clock = { now: () => new Date(now) };
   const worker = new OutboxWorker(store, telegram, clock, () => `lease-${++id}`);
-  return { store, telegram, worker };
+  return { store, telegram, worker, setNow: (iso: string) => { now = new Date(iso); } };
 }
 
 async function seed(
@@ -221,6 +222,14 @@ describe('OutboxWorker retries', () => {
     expect(pending(app)).toEqual([]);
   });
 
+  it('classifies permanent failures through the Telegram port error contract', async () => {
+    const app = fixture();
+    await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
+    vi.mocked(app.telegram.sendMessage).mockRejectedValue(new TelegramError('sendMessage', 403, 'forbidden'));
+    expect(await app.worker.flush()).toEqual({ sent: 0, rescheduled: 0 });
+    expect(pending(app)).toEqual([]);
+  });
+
   it('enqueues exactly one generic admin notice on the fourth transient failure and retries hourly', async () => {
     const app = fixture();
     await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
@@ -236,11 +245,28 @@ describe('OutboxWorker retries', () => {
     })]);
   });
 
+  it('retries the fourth-failure atomic transition after an injected notice write failure', async () => {
+    const app = fixture();
+    await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
+    await app.store.rescheduleEffect('effect-1', 3, NOW, 'old');
+    app.store.failNextReschedule();
+    vi.mocked(app.telegram.sendMessage).mockRejectedValue(new Error('network'));
+    await expect(app.worker.flush(1)).rejects.toThrow('injected reschedule failure');
+    expect(pending(app)).toEqual([expect.objectContaining({ effectId: 'effect-1', attempts: 3 })]);
+
+    app.setNow('2026-07-21T08:00:31.000Z');
+    expect(await app.worker.flush(1)).toEqual({ sent: 0, rescheduled: 1 });
+    expect(pending(app).filter((effect) => effect.effectId === 'admin-error:effect-1')).toHaveLength(1);
+    expect(pending(app).find((effect) => effect.effectId === 'effect-1')).toMatchObject({ attempts: 4 });
+  });
+
   it('truncates stored error text to 500 characters and removes bot tokens', async () => {
     const app = fixture();
     const token = '1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef_12';
     await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
-    vi.mocked(app.telegram.sendMessage).mockRejectedValue(new Error(`${token} ${'x'.repeat(700)}`));
+    vi.mocked(app.telegram.sendMessage).mockRejectedValue(new Error(
+      `https://api.telegram.org/bot${token}/sendMessage ${'x'.repeat(700)}`,
+    ));
     await app.worker.flush();
     const status = await app.store.getOperationalStatus();
     expect(status.lastSafeError?.length).toBeLessThanOrEqual(500);

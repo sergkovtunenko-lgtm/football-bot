@@ -50,4 +50,38 @@ describe('InMemoryFootballStore contract', () => {
     expect(await store.claimDueEffects('2026-07-21T08:00:29.999Z', 1, 'lease-2')).toEqual([]);
     expect(await store.claimDueEffects('2026-07-21T08:00:30.000Z', 1, 'lease-3')).toHaveLength(1);
   });
+
+  it('atomically reschedules a fourth failure and ensures one retry-safe admin notice', async () => {
+    const store = new InMemoryFootballStore();
+    await store.transact((tx) => tx.enqueue(
+      'effect-1', { kind: 'reminder', sessionId: 's', actionKey: 'thu' }, '2026-07-21T08:00:00.000Z',
+    ));
+    await store.claimDueEffects('2026-07-21T08:00:00.000Z', 1, 'lease-1');
+    store.failNextEnqueue();
+
+    const notice = {
+      kind: 'admin_error' as const,
+      correlationId: 'effect-1',
+      summary: 'Не удалось доставить служебное сообщение после нескольких попыток.',
+    };
+    await expect(store.rescheduleEffectWithNotice(
+      'effect-1', 4, '2026-07-21T09:00:00.000Z', 'safe',
+      'admin-error:effect-1', notice, '2026-07-21T08:00:00.000Z',
+    )).rejects.toThrow('injected enqueue failure');
+    expect(store.pendingEffects()).toEqual([expect.objectContaining({ effectId: 'effect-1', attempts: 0 })]);
+
+    await store.rescheduleEffectWithNotice(
+      'effect-1', 4, '2026-07-21T09:00:00.000Z', 'safe',
+      'admin-error:effect-1', notice, '2026-07-21T08:00:31.000Z',
+    );
+    await store.rescheduleEffectWithNotice(
+      'effect-1', 4, '2026-07-21T09:00:00.000Z', 'safe',
+      'admin-error:effect-1', notice, '2026-07-21T08:00:31.000Z',
+    );
+    expect(store.pendingEffects()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ effectId: 'effect-1', attempts: 4 }),
+      expect.objectContaining({ effectId: 'admin-error:effect-1', effect: notice }),
+    ]));
+    expect(store.pendingEffects().filter((effect) => effect.effectId === 'admin-error:effect-1')).toHaveLength(1);
+  });
 });

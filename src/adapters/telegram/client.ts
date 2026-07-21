@@ -1,16 +1,17 @@
-import type { InlineKeyboard, SentMessage, TelegramPort } from '../../ports/telegram';
+import { TelegramError, type InlineKeyboard, type SentMessage, type TelegramPort } from '../../ports/telegram';
 import { telegramId, type TelegramApiResponse } from './types';
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
 type Sleeper = (milliseconds: number) => Promise<void>;
 
-export class TelegramApiError extends Error {
+export class TelegramApiError extends TelegramError {
   constructor(
-    readonly method: string,
-    readonly status: number | undefined,
-    readonly description: string,
+    method: string,
+    status: number | undefined,
+    description: string,
+    retryAfterSeconds?: number,
   ) {
-    super(`Telegram API ${method} failed${status === undefined ? '' : ` (${status})`}: ${description}`);
+    super(method, status, description, retryAfterSeconds);
     this.name = 'TelegramApiError';
   }
 }
@@ -80,7 +81,7 @@ export class TelegramClient implements TelegramPort {
         await this.sleep(delays[attempt]!);
         continue;
       }
-      throw new TelegramApiError(method, status, description);
+      throw new TelegramApiError(method, status, description, retryAfter);
     }
     throw new TelegramApiError(method, undefined, 'network request failed');
   }

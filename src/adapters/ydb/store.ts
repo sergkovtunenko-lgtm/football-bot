@@ -12,6 +12,7 @@ import type {
 } from '../../domain/model';
 import type {
   BotSettings,
+  AdminErrorEffect,
   FootballStore,
   FootballTransaction,
   OperationalStatus,
@@ -19,11 +20,11 @@ import type {
   TelegramEffect,
   UpdateExecution,
 } from '../../ports/store';
+import { redactTelegramTokens } from '../../security/redact';
 
 const TRANSACTION_OPTIONS = { isolation: 'serializableReadWrite', idempotent: true } as const;
 const LEASE_MILLISECONDS = 30_000;
 const SAFE_ERROR_LIMIT = 500;
-const TELEGRAM_TOKEN = /\b[0-9]{8,12}:[A-Za-z0-9_-]{30,}\b/g;
 
 export class YdbFootballStore implements FootballStore {
   private readonly sql: QueryClient;
@@ -111,6 +112,43 @@ export class YdbFootballStore implements FootballStore {
             sent_at = NULL, failed_at = NULL, last_error = ${storedSafeError(safeError)}
         WHERE effect_id = ${effectId}
       `;
+      await saveLastSafeError(tx, safeError);
+    });
+  }
+
+  rescheduleEffectWithNotice(
+    effectId: string,
+    attempts: number,
+    nextAttemptAtIso: string,
+    safeError: string,
+    noticeEffectId: string,
+    notice: AdminErrorEffect,
+    noticeAtIso: string,
+  ): Promise<void> {
+    return this.sql.begin(TRANSACTION_OPTIONS, async (tx) => {
+      await requireEffect(tx, effectId);
+      await tx`
+        UPDATE outbox
+        SET status = ${'pending'}, attempts = ${uint32(attempts)},
+            next_attempt_at = ${timestamp(nextAttemptAtIso)}, lease_id = NULL, lease_until = NULL,
+            sent_at = NULL, failed_at = NULL, last_error = ${storedSafeError(safeError)}
+        WHERE effect_id = ${effectId}
+      `;
+      const [noticeRows] = await tx<[{ effect_id: string }]>`
+        SELECT effect_id FROM outbox WHERE effect_id = ${noticeEffectId}
+      `;
+      if (noticeRows.length === 0) {
+        const noticeAt = timestamp(noticeAtIso);
+        await tx`
+          INSERT INTO outbox (
+            effect_id, kind, payload_json, status, attempts, next_attempt_at,
+            lease_id, lease_until, created_at, sent_at, failed_at, last_error
+          ) VALUES (
+            ${noticeEffectId}, ${notice.kind}, ${JSON.stringify(notice)}, ${'pending'}, ${new Uint32(0)}, ${noticeAt},
+            NULL, NULL, ${noticeAt}, NULL, NULL, NULL
+          )
+        `;
+      }
       await saveLastSafeError(tx, safeError);
     });
   }
@@ -521,7 +559,7 @@ function uint32(value: number): Uint32 {
 }
 
 function storedSafeError(error: string): string {
-  return error.replace(TELEGRAM_TOKEN, '[redacted]').slice(0, SAFE_ERROR_LIMIT);
+  return redactTelegramTokens(error).slice(0, SAFE_ERROR_LIMIT);
 }
 
 function sessionFromRow(row: SessionRow): Session {

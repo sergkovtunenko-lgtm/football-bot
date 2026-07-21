@@ -199,7 +199,8 @@ describeYdb(suiteName, () => {
     expect((await store.claimDueEffects('2026-07-21T08:00:30.000Z', 1, 'lease-3')).map(({ effectId }) => effectId))
       .toEqual(['a']);
 
-    const unsafeError = `123456789:abcdefghijklmnopqrstuvwxyzABCDE_ ${'x'.repeat(600)}`;
+    const token = '123456789:abcdefghijklmnopqrstuvwxyzABCDE_';
+    const unsafeError = `https://api.telegram.org/bot${token}/sendMessage ${'x'.repeat(600)}`;
     await store.rescheduleEffect('a', 2, '2026-07-21T08:02:00.000Z', 'retryable');
     await store.markEffectSent('b', '2026-07-21T08:00:31.123Z');
     await store.markEffectPermanentlyFailed('c', '2026-07-21T08:00:31.456Z', unsafeError);
@@ -214,7 +215,7 @@ describeYdb(suiteName, () => {
     expect((rows[1]!.sent_at as Date).toISOString()).toBe('2026-07-21T08:00:31.123Z');
     expect(rows[2]).toMatchObject({ effect_id: 'c', status: 'failed', lease_id: null, lease_until: null });
     expect(rows[2]!.failed_at?.toISOString()).toBe('2026-07-21T08:00:31.456Z');
-    expect(rows[2]!.last_error).not.toContain('123456789:');
+    expect(rows[2]!.last_error).not.toContain(token);
     expect(rows[2]!.last_error).toHaveLength(500);
     expect(await store.getOperationalStatus()).toEqual({ pendingEffectCount: 1, lastSafeError: rows[2]!.last_error });
 
@@ -222,6 +223,31 @@ describeYdb(suiteName, () => {
       effectId: 'a', effect: { kind: 'registration_card', sessionId: 's' }, attempts: 2,
       nextAttemptAtIso: '2026-07-21T08:02:00.000Z',
     });
+  });
+
+  it('atomically reschedules a fourth failure and inserts its admin notice once', async () => {
+    await store.transact((tx) => tx.enqueue(
+      'effect-1', { kind: 'reminder', sessionId: 's', actionKey: 'thu' }, '2026-07-21T08:00:00.000Z',
+    ));
+    await store.claimDueEffects('2026-07-21T08:00:00.000Z', 1, 'lease-1');
+    const notice = {
+      kind: 'admin_error' as const, correlationId: 'effect-1', summary: 'generic',
+    };
+    await store.rescheduleEffectWithNotice(
+      'effect-1', 4, '2026-07-21T09:00:00.000Z', 'safe',
+      'admin-error:effect-1', notice, '2026-07-21T08:00:00.000Z',
+    );
+    await store.rescheduleEffectWithNotice(
+      'effect-1', 4, '2026-07-21T09:00:00.000Z', 'safe',
+      'admin-error:effect-1', notice, '2026-07-21T08:00:00.000Z',
+    );
+    const [rows] = await cleanupSql<[{ effect_id: string; status: string; attempts: number }] >`
+      SELECT effect_id, status, attempts FROM outbox ORDER BY effect_id
+    `;
+    expect(rows).toEqual([
+      { effect_id: 'admin-error:effect-1', status: 'pending', attempts: 0 },
+      { effect_id: 'effect-1', status: 'pending', attempts: 4 },
+    ]);
   });
 });
 

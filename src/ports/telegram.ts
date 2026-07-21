@@ -4,6 +4,18 @@ export interface InlineKeyboard {
 
 export interface SentMessage { messageId: string; }
 
+export class TelegramError extends Error {
+  constructor(
+    readonly method: string,
+    readonly status: number | undefined,
+    readonly description: string,
+    readonly retryAfterSeconds?: number,
+  ) {
+    super(`Telegram API ${method} failed${status === undefined ? '' : ` (${status})`}: ${description}`);
+    this.name = 'TelegramError';
+  }
+}
+
 export interface TelegramPort {
   sendMessage(chatId: string, html: string, keyboard?: InlineKeyboard): Promise<SentMessage>;
   editMessage(chatId: string, messageId: string, html: string, keyboard?: InlineKeyboard): Promise<void>;

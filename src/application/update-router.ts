@@ -71,6 +71,10 @@ export class UpdateRouter {
       update = parseUpdate(value);
     } catch (error) {
       logError('telegram_update_validation', error, {});
+      const callbackId = rawCallbackId(value);
+      if (callbackId !== undefined) {
+        await this.telegram.answerCallback(callbackId, 'Некорректное действие', true);
+      }
       return;
     }
     if (update.callback) {
@@ -111,12 +115,12 @@ export class UpdateRouter {
     message: ParsedMessage,
     command: RecoveryCommand,
   ): Promise<void> {
+    if (message.chatType !== 'group' && message.chatType !== 'supergroup') return;
+    if (command !== '/setup' && !await this.isConfiguredGroup(message.chatId)) return;
     if (!this.config.adminIds.has(actor.id)) {
       await this.telegram.sendMessage(message.chatId, 'Только администратор');
       return;
     }
-    if (message.chatType !== 'group' && message.chatType !== 'supergroup') return;
-    if (command !== '/setup' && !await this.isConfiguredGroup(message.chatId)) return;
     switch (command) {
       case '/setup':
         await this.service.setup(updateId, actor.id, message.chatId);
@@ -345,4 +349,9 @@ function playerFrom(user: ParsedUser): { telegramUserId: string; displayName: st
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function rawCallbackId(value: unknown): string | undefined {
+  if (!isRecord(value) || !isRecord(value.callback_query)) return undefined;
+  return typeof value.callback_query.id === 'string' ? value.callback_query.id : undefined;
 }

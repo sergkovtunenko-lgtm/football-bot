@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createHandler, createRetryAfterPreservingFetcher } from '../src/handler';
+import { createHandler, createLazyHandler, createRetryAfterPreservingFetcher } from '../src/handler';
 
 const SECRET = 'telegram_secret_123';
 
@@ -195,5 +195,40 @@ describe('Telegram retry-after transport', () => {
     const original = new Response('{"ok":true}', { status: 200 });
     const upstream = vi.fn().mockResolvedValue(original);
     expect(await createRetryAfterPreservingFetcher(upstream)('https://api.telegram.test', {})).toBe(original);
+  });
+});
+
+describe('lazy production security gates', () => {
+  it.each([
+    ['wrong secret', http({ headers: { 'x-telegram-bot-api-secret-token': 'wrong' } }), 403],
+    ['wrong method', http({ httpMethod: 'GET' }), 405],
+    ['oversized body', http({ body: `"${'x'.repeat(1024 * 1024)}"` }), 413],
+    ['invalid JSON', http({ body: '{bad-json' }), 400],
+  ])('handles %s before awaiting runtime dependencies', async (_name, event, statusCode) => {
+    const deps = fixture();
+    const resolveDependencies = vi.fn().mockRejectedValue(new Error('YDB unavailable'));
+    const lazy = createLazyHandler({
+      webhookSecret: SECRET,
+      resolveDependencies,
+      newCorrelationId: () => 'corr-lazy',
+    });
+    expect(await lazy(event, {} as never)).toMatchObject({ statusCode });
+    expect(resolveDependencies).not.toHaveBeenCalled();
+    expect(deps.router.handle).not.toHaveBeenCalled();
+  });
+
+  it('awaits runtime dependencies only after a valid authenticated request is parsed', async () => {
+    const deps = fixture();
+    const resolveDependencies = vi.fn().mockResolvedValue({
+      router: deps.router, scheduler: deps.scheduler, outbox: deps.outbox,
+    });
+    const lazy = createLazyHandler({
+      webhookSecret: SECRET,
+      resolveDependencies,
+      newCorrelationId: () => 'corr-lazy',
+    });
+    expect(await lazy(http(), {} as never)).toMatchObject({ statusCode: 200 });
+    expect(resolveDependencies).toHaveBeenCalledOnce();
+    expect(deps.router.handle).toHaveBeenCalledWith({ update_id: 77 });
   });
 });

@@ -1,5 +1,6 @@
 import type {
   BotSettings,
+  AdminErrorEffect,
   FootballStore,
   FootballTransaction,
   OperationalStatus,
@@ -37,6 +38,7 @@ export class InMemoryFootballStore implements FootballStore {
   private state: State = emptyState();
   private queue: Promise<void> = Promise.resolve();
   private rejectNextEnqueue = false;
+  private rejectNextReschedule = false;
 
   transact<T>(work: (tx: FootballTransaction) => Promise<T>): Promise<T> {
     return this.serialized(async () => {
@@ -89,12 +91,54 @@ export class InMemoryFootballStore implements FootballStore {
 
   rescheduleEffect(effectId: string, attempts: number, nextAttemptAtIso: string, safeError: string): Promise<void> {
     return this.serialized(async () => {
+      if (this.rejectNextReschedule) {
+        this.rejectNextReschedule = false;
+        throw new Error('injected reschedule failure');
+      }
       const effect = this.requiredEffect(effectId);
       effect.attempts = attempts;
       effect.nextAttemptAtIso = nextAttemptAtIso;
       delete effect.leaseId;
       delete effect.leaseExpiresAtIso;
       this.state.lastSafeError = safeError;
+    });
+  }
+
+  rescheduleEffectWithNotice(
+    effectId: string,
+    attempts: number,
+    nextAttemptAtIso: string,
+    safeError: string,
+    noticeEffectId: string,
+    notice: AdminErrorEffect,
+    noticeAtIso: string,
+  ): Promise<void> {
+    return this.serialized(async () => {
+      const clone = structuredClone(this.state);
+      const effect = clone.effects.get(effectId);
+      if (!effect) throw new Error(`effect not found: ${effectId}`);
+      if (!clone.effects.has(noticeEffectId)) {
+        if (this.rejectNextEnqueue) {
+          this.rejectNextEnqueue = false;
+          throw new Error('injected enqueue failure');
+        }
+        clone.effects.set(noticeEffectId, {
+          effectId: noticeEffectId,
+          effect: structuredClone(notice),
+          attempts: 0,
+          nextAttemptAtIso: noticeAtIso,
+        });
+      }
+      if (this.rejectNextReschedule) {
+        this.rejectNextReschedule = false;
+        throw new Error('injected reschedule failure');
+      }
+      effect.attempts = attempts;
+      effect.nextAttemptAtIso = nextAttemptAtIso;
+      delete effect.leaseId;
+      delete effect.leaseExpiresAtIso;
+      clone.lastSafeError = safeError;
+      this.state = clone;
     });
   }
 
@@ -130,6 +174,10 @@ export class InMemoryFootballStore implements FootballStore {
 
   failNextEnqueue(): void {
     this.rejectNextEnqueue = true;
+  }
+
+  failNextReschedule(): void {
+    this.rejectNextReschedule = true;
   }
 
   private transaction(state: State): FootballTransaction {
