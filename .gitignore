@@ -1,7 +1,10 @@
 node_modules/
 dist/
+.artifacts/
 coverage/
 .env
 .env.*
 !.env.example
+*.key.json
+*.sqlite*
 *.log
