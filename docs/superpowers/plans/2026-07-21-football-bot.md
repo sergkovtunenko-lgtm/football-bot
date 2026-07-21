@@ -12,7 +12,7 @@
 
 - Follow the approved spec at `docs/superpowers/specs/2026-07-21-football-bot-design.md` exactly.
 - Use `Europe/Moscow` for product time and UTC only at the Yandex cron boundary.
-- Open registration Tuesday 10:00; remind Wednesday, Thursday, and Friday 10:00; close Friday 20:55; play Friday 21:00.
+- Open registration Tuesday 10:00; remind Wednesday, Thursday, and Friday 10:00, catching up only through 12:00 Moscow; close Friday 20:55; play Friday 21:00.
 - Limit the active list to 20 individual slots; keep overflow in a FIFO waitlist and promote atomically after cancellation.
 - Create only complete teams of five, from two through four teams; spread remaining active players across team reserves with a difference of at most one.
 - Do not choose match order, opponents, scores, losses, draws, MVP, or win percentage.
@@ -934,11 +934,11 @@ export function sessionIdForCurrentCycle(now: Date): string {
 }
 ```
 
-Implement `dueScheduleActions` so it only emits `open` between Tuesday 10:00 and Friday 20:55 when a current session is absent/scheduled; emits only today's due reminder while registration is open; and emits `close` from Friday 20:55 onward while registration is open. Filter every result by `completedActionKeys`. On Saturday through Monday, target the next Friday and emit no action.
+Implement `dueScheduleActions` so it only emits `open` between Tuesday 10:00 and Friday 20:55 when a current session is absent/scheduled; emits only today's due reminder while registration is open and Moscow local time is from 10:00 through the end of the 12:00 minute (the half-open interval `[10:00, 12:01)`); and emits `close` from Friday 20:55 onward while registration is open. Filter every result by `completedActionKeys`. On Saturday through Monday, target the next Friday and emit no action.
 
 - [ ] **Step 3: Add timezone and duplicate-action coverage**
 
-Add tests for Monday 23:59, Tuesday catch-up at 12:00, Friday at exactly 10:00 and 20:55, Saturday, an already completed open key, a finished session, and two invocations in the same minute returning the same stable key.
+Add tests for Monday 23:59, Tuesday catch-up at 12:00, Friday at exactly 10:00 and 20:55, reminder catch-up at exactly 12:00 and suppression at 12:01, Saturday, an already completed open key, a finished session, and two invocations in the same minute returning the same stable key.
 
 Add `nextScheduleAction(now, status)` tests showing the next Moscow action and ISO instant for `/status`: Tuesday open, the next daily reminder while open, Friday close while open, and next Tuesday open after finish.
 
