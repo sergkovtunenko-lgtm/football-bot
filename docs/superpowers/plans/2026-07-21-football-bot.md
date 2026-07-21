@@ -1241,13 +1241,13 @@ it('runs registration, close, wins, undo, and finish exactly once', async () => 
     await app.service.setParty(`u:r:${i}`, { telegramUserId: String(i), displayName: `P${i}` }, 1);
   }
   const closed = await app.service.closeNow('u:close', '900');
-  expect(closed.teamCount).toBe(2);
+  expect(closed.value?.teamCount).toBe(2);
   const first = await app.service.recordWin('u:w:1', '900', 1);
   expect(first.duplicate).toBe(false);
   expect((await app.service.recordWin('u:w:1', '900', 1)).duplicate).toBe(true);
   await app.service.undoLastWin('u:undo', '900');
   const finished = await app.service.finish('u:finish', '900');
-  expect(finished.leaderboard).toEqual([]);
+  expect(finished.value?.leaderboard).toEqual([]);
 });
 ```
 
