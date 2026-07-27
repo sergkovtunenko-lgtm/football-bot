@@ -176,6 +176,17 @@ try {
     if ($null -eq $Database) {
         throw 'The YDB database disappeared after configuration update.'
     }
+    $YdbRestIamToken = Invoke-YcText @('iam', 'create-token') 'Short-lived IAM token creation for YDB configuration'
+    try {
+        [void](Set-YdbDeletionProtectionViaRest -DatabaseId ([string]$Database.id) -IamToken $YdbRestIamToken)
+    }
+    finally {
+        $YdbRestIamToken = $null
+    }
+    $Database = Get-YcJsonOrNull @('ydb', 'database', 'get', $DatabaseName, '--format', 'json') 'REST-converged YDB database lookup'
+    if ($null -eq $Database) {
+        throw 'The YDB database disappeared after REST configuration update.'
+    }
     Assert-YdbDatabaseConfiguration $Database
     $YdbConnectionString = [string]$Database.endpoint
     if ([string]::IsNullOrWhiteSpace($YdbConnectionString)) {
