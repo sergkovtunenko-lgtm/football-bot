@@ -88,20 +88,26 @@ function Set-YdbDeletionProtectionViaRest {
         updateMask = 'deletionProtection'
         deletionProtection = $true
     } | ConvertTo-Json -Compress
-    $Operation = & $RequestInvoker 'PATCH' $DatabaseUri $IamToken $BodyJson
     $MalformedOperationMessage = 'YDB deletion-protection update returned a malformed operation.'
-    if ($null -eq $Operation -or $Operation.GetType() -ne [Management.Automation.PSCustomObject]) {
-        throw $MalformedOperationMessage
+    $AssertOperationShape = {
+        param([AllowNull()][object] $Candidate)
+        if ($null -eq $Candidate -or $Candidate.GetType() -ne [Management.Automation.PSCustomObject]) {
+            throw $MalformedOperationMessage
+        }
+        $CandidateId = $Candidate.PSObject.Properties['id']
+        if ($null -eq $CandidateId -or [string]::IsNullOrWhiteSpace([string]$CandidateId.Value)) {
+            throw $MalformedOperationMessage
+        }
     }
+    $Operation = & $RequestInvoker 'PATCH' $DatabaseUri $IamToken $BodyJson
+    & $AssertOperationShape $Operation
     $OperationIdProperty = $Operation.PSObject.Properties['id']
-    if ($null -eq $OperationIdProperty -or [string]::IsNullOrWhiteSpace([string]$OperationIdProperty.Value)) {
-        throw $MalformedOperationMessage
-    }
 
     $OperationId = [Uri]::EscapeDataString([string]$OperationIdProperty.Value)
     $OperationUri = "https://operation.api.cloud.yandex.net/operations/$OperationId"
     $Deadline = [DateTime]::UtcNow.AddMinutes(5)
     while ($true) {
+        & $AssertOperationShape $Operation
         $DoneProperty = $Operation.PSObject.Properties['done']
         if ($null -ne $DoneProperty -and $DoneProperty.Value -eq $true) {
             break
