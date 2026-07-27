@@ -188,6 +188,44 @@ describe.skipIf(process.platform !== 'win32')('deploy PowerShell helpers', () =>
     expect(output).not.toContain('operation-sensitive-id');
   }, powerShellTestTimeout);
 
+  it('reports malformed operation responses with one fixed safe message', () => {
+    const command = `
+      . '${escapedHelperPath}'
+      $operationResponses = @(
+        $null
+        [pscustomobject]@{}
+        'raw-provider-value-should-not-appear'
+      )
+      $messages = foreach ($operationResponse in $operationResponses) {
+        $requestInvoker = {
+          param($Method, $Uri, $IamToken, $BodyJson)
+          return $operationResponse
+        }
+        try {
+          Set-YdbDeletionProtectionViaRest -DatabaseId 'database-sensitive-id' -IamToken 'secret-iam-token-should-not-appear' -RequestInvoker $requestInvoker
+          'unexpected success'
+        }
+        catch {
+          $_.Exception.Message
+        }
+      }
+      $messages | ConvertTo-Json -Compress
+    `;
+    const messages = JSON.parse(execFileSync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ], { encoding: 'utf8' }).trim()) as string[];
+    const output = messages.join('\n');
+
+    expect(messages).toEqual([
+      'YDB deletion-protection update returned a malformed operation.',
+      'YDB deletion-protection update returned a malformed operation.',
+      'YDB deletion-protection update returned a malformed operation.',
+    ]);
+    expect(output).not.toContain('raw-provider-value-should-not-appear');
+    expect(output).not.toContain('secret-iam-token-should-not-appear');
+    expect(output).not.toContain('database-sensitive-id');
+  }, powerShellTestTimeout);
+
   it('sanitizes transport failures from the real REST request boundary', () => {
     const command = `
       Add-Type -AssemblyName System.Net.Http

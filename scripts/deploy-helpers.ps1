@@ -89,9 +89,13 @@ function Set-YdbDeletionProtectionViaRest {
         deletionProtection = $true
     } | ConvertTo-Json -Compress
     $Operation = & $RequestInvoker 'PATCH' $DatabaseUri $IamToken $BodyJson
+    $MalformedOperationMessage = 'YDB deletion-protection update returned a malformed operation.'
+    if ($null -eq $Operation -or $Operation.GetType() -ne [Management.Automation.PSCustomObject]) {
+        throw $MalformedOperationMessage
+    }
     $OperationIdProperty = $Operation.PSObject.Properties['id']
     if ($null -eq $OperationIdProperty -or [string]::IsNullOrWhiteSpace([string]$OperationIdProperty.Value)) {
-        throw 'YDB deletion-protection update returned an operation without an ID.'
+        throw $MalformedOperationMessage
     }
 
     $OperationId = [Uri]::EscapeDataString([string]$OperationIdProperty.Value)
