@@ -48,6 +48,79 @@ function ConvertTo-RuntimeAdminIds {
     return $AdminIds.Replace(',', ';')
 }
 
+function Invoke-ProductionRollback {
+    param(
+        [Parameter(Mandatory)][bool] $StableMoved,
+        [AllowEmptyString()][string] $PreviousStableVersionId,
+        [Parameter(Mandatory)][bool] $CloudflareDeployed,
+        [AllowEmptyString()][string] $PreviousCloudflareVersionId,
+        [Parameter(Mandatory)][bool] $WebhookSetupAttempted,
+        [AllowEmptyString()][string] $PreviousWebhookSecret,
+        [AllowEmptyString()][string] $PreviousWebhookUrl,
+        [AllowEmptyString()][string] $RestoredYandexFunctionUrl,
+        [Parameter(Mandatory)][scriptblock] $YandexRollback,
+        [Parameter(Mandatory)][scriptblock] $CloudflareRollback,
+        [Parameter(Mandatory)][scriptblock] $FirstCloudflareRollback,
+        [Parameter(Mandatory)][scriptblock] $TelegramRollback
+    )
+
+    $Result = [ordered]@{
+        YandexRestored = $false
+        CloudflareRestored = $false
+        TelegramRestored = $false
+    }
+    if ($StableMoved -and -not [string]::IsNullOrWhiteSpace($PreviousStableVersionId)) {
+        try {
+            & $YandexRollback $PreviousStableVersionId
+            $Result.YandexRestored = $true
+        }
+        catch {
+            Write-Warning 'Automatic Yandex stable version rollback failed.'
+        }
+    }
+    if (
+        $CloudflareDeployed -and
+        -not [string]::IsNullOrWhiteSpace($PreviousCloudflareVersionId)
+    ) {
+        try {
+            & $CloudflareRollback $PreviousCloudflareVersionId
+            $Result.CloudflareRestored = $true
+        }
+        catch {
+            Write-Warning 'Automatic Cloudflare Worker rollback failed.'
+        }
+    }
+    elseif (
+        $CloudflareDeployed -and
+        -not [string]::IsNullOrWhiteSpace($PreviousWebhookSecret) -and
+        -not [string]::IsNullOrWhiteSpace($RestoredYandexFunctionUrl)
+    ) {
+        try {
+            & $FirstCloudflareRollback `
+                $PreviousWebhookSecret `
+                $RestoredYandexFunctionUrl
+            $Result.CloudflareRestored = $true
+        }
+        catch {
+            Write-Warning 'Automatic first Cloudflare Worker rollback failed.'
+        }
+    }
+    if (
+        $WebhookSetupAttempted -and
+        -not [string]::IsNullOrWhiteSpace($PreviousWebhookSecret) -and
+        -not [string]::IsNullOrWhiteSpace($PreviousWebhookUrl)
+    ) {
+        try {
+            & $TelegramRollback $PreviousWebhookSecret $PreviousWebhookUrl
+            $Result.TelegramRestored = $true
+        }
+        catch {
+            Write-Warning 'Automatic Telegram webhook rollback failed.'
+        }
+    }
+    return [pscustomobject]$Result
+}
+
 function Invoke-YandexCloudRestJsonRequest {
     param(
         [Parameter(Mandatory)][ValidateSet('GET', 'PATCH')][string] $Method,
@@ -57,6 +130,7 @@ function Invoke-YandexCloudRestJsonRequest {
     )
 
     $Client = [System.Net.Http.HttpClient]::new()
+    $Client.Timeout = [TimeSpan]::FromSeconds(30)
     $Request = $null
     $Response = $null
     try {
@@ -123,6 +197,20 @@ function Set-YdbDeletionProtectionViaRest {
             Start-Sleep -Seconds $Seconds
         }
     }
+    $InvokeRequestWithRetry = {
+        param($Method, $Uri, $Token, $BodyJson)
+        for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
+            try {
+                return & $RequestInvoker $Method $Uri $Token $BodyJson
+            }
+            catch {
+                if ($Attempt -eq 3) {
+                    throw
+                }
+                & $DelayInvoker 2
+            }
+        }
+    }
 
     $EscapedDatabaseId = [Uri]::EscapeDataString($DatabaseId)
     $DatabaseUri = "https://ydb.api.cloud.yandex.net/ydb/v1/databases/$EscapedDatabaseId"
@@ -141,7 +229,7 @@ function Set-YdbDeletionProtectionViaRest {
             throw $MalformedOperationMessage
         }
     }
-    $Operation = & $RequestInvoker 'PATCH' $DatabaseUri $IamToken $BodyJson
+    $Operation = & $InvokeRequestWithRetry 'PATCH' $DatabaseUri $IamToken $BodyJson
     & $AssertOperationShape $Operation
     $OperationIdProperty = $Operation.PSObject.Properties['id']
 
@@ -158,7 +246,7 @@ function Set-YdbDeletionProtectionViaRest {
             throw 'Timed out waiting for YDB deletion-protection update.'
         }
         & $DelayInvoker 2
-        $Operation = & $RequestInvoker 'GET' $OperationUri $IamToken $null
+        $Operation = & $InvokeRequestWithRetry 'GET' $OperationUri $IamToken $null
     }
 
     $OperationError = $Operation.PSObject.Properties['error']
@@ -166,7 +254,7 @@ function Set-YdbDeletionProtectionViaRest {
         throw 'YDB deletion-protection update operation failed.'
     }
 
-    $Database = & $RequestInvoker 'GET' $DatabaseUri $IamToken $null
+    $Database = & $InvokeRequestWithRetry 'GET' $DatabaseUri $IamToken $null
     $DeletionProtection = $Database.PSObject.Properties['deletionProtection']
     if ($null -eq $DeletionProtection -or $DeletionProtection.Value -ne $true) {
         throw 'YDB deletion protection is not enabled after REST update.'

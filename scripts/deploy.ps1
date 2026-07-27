@@ -9,6 +9,7 @@ $FunctionName = 'friday-football-bot'
 $DatabaseName = 'friday-football-bot-db'
 $ServiceAccountName = 'friday-football-bot-runtime'
 $TriggerName = 'friday-football-bot-every-minute'
+$CloudflareWebhookUrl = 'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram'
 $CronExpression = '* * * * ? *'
 $TriggerPayload = 'tick'
 $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -87,7 +88,10 @@ function Invoke-WebhookProbe {
         [Parameter(Mandatory)][string] $Secret,
         [Parameter(Mandatory)][int] $ExpectedStatus
     )
-    $Client = [System.Net.Http.HttpClient]::new()
+    $Handler = [System.Net.Http.HttpClientHandler]::new()
+    $Handler.AllowAutoRedirect = $false
+    $Client = [System.Net.Http.HttpClient]::new($Handler)
+    $Client.Timeout = [TimeSpan]::FromSeconds(20)
     $Request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, $Url)
     try {
         [void]$Request.Headers.TryAddWithoutValidation('X-Telegram-Bot-Api-Secret-Token', $Secret)
@@ -105,7 +109,96 @@ function Invoke-WebhookProbe {
     finally {
         $Request.Dispose()
         $Client.Dispose()
+        $Handler.Dispose()
     }
+}
+
+function Invoke-TelegramBotApiJson {
+    param(
+        [Parameter(Mandatory)][string] $BotToken,
+        [Parameter(Mandatory)][string] $MethodName,
+        [AllowNull()][object] $Body
+    )
+    $Handler = [System.Net.Http.HttpClientHandler]::new()
+    $Handler.AllowAutoRedirect = $false
+    $Client = [System.Net.Http.HttpClient]::new($Handler)
+    $Client.Timeout = [TimeSpan]::FromSeconds(20)
+    $Request = $null
+    $Response = $null
+    try {
+        $Method = if ($null -eq $Body) {
+            [System.Net.Http.HttpMethod]::Get
+        }
+        else {
+            [System.Net.Http.HttpMethod]::Post
+        }
+        $Request = [System.Net.Http.HttpRequestMessage]::new(
+            $Method,
+            "https://api.telegram.org/bot$BotToken/$MethodName"
+        )
+        if ($null -ne $Body) {
+            $BodyJson = $Body | ConvertTo-Json -Compress
+            $Request.Content = [System.Net.Http.StringContent]::new(
+                $BodyJson,
+                [Text.Encoding]::UTF8,
+                'application/json'
+            )
+        }
+        $Response = $Client.SendAsync($Request).GetAwaiter().GetResult()
+        if ([int]$Response.StatusCode -ne 200) {
+            throw 'Unexpected Telegram status.'
+        }
+        $ResponseJson = $Response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        $Payload = $ResponseJson | ConvertFrom-Json
+        if ($Payload.ok -ne $true) {
+            throw 'Telegram rejected the request.'
+        }
+        return $Payload
+    }
+    catch {
+        throw 'Telegram Bot API deployment request failed.'
+    }
+    finally {
+        if ($null -ne $Response) {
+            $Response.Dispose()
+        }
+        if ($null -ne $Request) {
+            $Request.Dispose()
+        }
+        $Client.Dispose()
+        $Handler.Dispose()
+    }
+}
+
+function Get-TelegramWebhookUrl {
+    param([Parameter(Mandatory)][string] $BotToken)
+    $Payload = Invoke-TelegramBotApiJson $BotToken 'getWebhookInfo' $null
+    if ($null -eq $Payload.result) {
+        throw 'Telegram webhook lookup returned an invalid result.'
+    }
+    return [string]$Payload.result.url
+}
+
+function Set-TelegramWebhookConfiguration {
+    param(
+        [Parameter(Mandatory)][string] $BotToken,
+        [Parameter(Mandatory)][string] $WebhookSecret,
+        [Parameter(Mandatory)][string] $WebhookUrl
+    )
+    $ParsedUrl = $null
+    if (
+        -not [Uri]::TryCreate($WebhookUrl, [UriKind]::Absolute, [ref]$ParsedUrl) -or
+        $ParsedUrl.Scheme -ne 'https'
+    ) {
+        throw 'Previous Telegram webhook URL is invalid.'
+    }
+    [void](Invoke-TelegramBotApiJson $BotToken 'setWebhook' @{
+        url = $ParsedUrl.ToString()
+        secret_token = $WebhookSecret
+        allowed_updates = @('message', 'callback_query')
+        drop_pending_updates = $false
+        max_connections = 1
+    })
 }
 
 $BotToken = Require-EnvironmentValue 'BOT_TOKEN'
@@ -121,6 +214,7 @@ if ($AdminIds -notmatch '^-?\d+(,-?\d+)*$') {
     throw 'ADMIN_IDS must be a comma-separated list of numeric Telegram user IDs.'
 }
 $RuntimeAdminIds = ConvertTo-RuntimeAdminIds $AdminIds
+$PreviousTelegramWebhookUrl = Get-TelegramWebhookUrl $BotToken
 
 $FolderId = Invoke-YcText @('config', 'get', 'folder-id') 'Folder configuration lookup'
 if ([string]::IsNullOrWhiteSpace($FolderId)) {
@@ -128,6 +222,10 @@ if ([string]::IsNullOrWhiteSpace($FolderId)) {
 }
 
 $PreviousStableVersionId = $null
+$PreviousWebhookSecret = $null
+$CloudflarePreviousVersionId = $null
+$CloudflareDeployed = $false
+$WebhookSetupAttempted = $false
 $StableMoved = $false
 Push-Location -LiteralPath $RepositoryRoot
 try {
@@ -147,16 +245,19 @@ try {
     if ($null -eq $Database) {
         throw 'The YDB database disappeared after configuration update.'
     }
-    $YdbRestIamToken = Invoke-YcText @('iam', 'create-token') 'Short-lived IAM token creation for YDB configuration'
-    try {
-        [void](Set-YdbDeletionProtectionViaRest -DatabaseId ([string]$Database.id) -IamToken $YdbRestIamToken)
-    }
-    finally {
-        $YdbRestIamToken = $null
-    }
-    $Database = Get-YcJsonOrNull @('ydb', 'database', 'get', $DatabaseName, '--format', 'json') 'REST-converged YDB database lookup'
-    if ($null -eq $Database) {
-        throw 'The YDB database disappeared after REST configuration update.'
+    $DeletionProtectionProperty = $Database.PSObject.Properties['deletion_protection']
+    if ($null -eq $DeletionProtectionProperty -or $DeletionProtectionProperty.Value -ne $true) {
+        $YdbRestIamToken = Invoke-YcText @('iam', 'create-token') 'Short-lived IAM token creation for YDB configuration'
+        try {
+            [void](Set-YdbDeletionProtectionViaRest -DatabaseId ([string]$Database.id) -IamToken $YdbRestIamToken)
+        }
+        finally {
+            $YdbRestIamToken = $null
+        }
+        $Database = Get-YcJsonOrNull @('ydb', 'database', 'get', $DatabaseName, '--format', 'json') 'REST-converged YDB database lookup'
+        if ($null -eq $Database) {
+            throw 'The YDB database disappeared after REST configuration update.'
+        }
     }
     Assert-YdbDatabaseConfiguration $Database
     $YdbConnectionString = [string]$Database.endpoint
@@ -203,6 +304,12 @@ try {
 
     $PreviousStable = Get-YcJsonOrNull @('serverless', 'function', 'version', 'get-by-tag', '--function-name', $FunctionName, '--tag', 'stable', '--format', 'json') 'Stable version lookup'
     $PreviousStableVersionId = if ($null -eq $PreviousStable) { $null } else { [string]$PreviousStable.id }
+    if ($null -ne $PreviousStable -and $null -ne $PreviousStable.environment) {
+        $PreviousWebhookSecretProperty = $PreviousStable.environment.PSObject.Properties['WEBHOOK_SECRET']
+        if ($null -ne $PreviousWebhookSecretProperty) {
+            $PreviousWebhookSecret = [string]$PreviousWebhookSecretProperty.Value
+        }
+    }
 
     $Environment = "BOT_TOKEN=$BotToken,WEBHOOK_SECRET=$WebhookSecret,ADMIN_IDS=$RuntimeAdminIds,YDB_CONNECTION_STRING=$YdbConnectionString,YDB_METADATA_CREDENTIALS=1"
     $PreviousErrorActionPreference = $ErrorActionPreference
@@ -213,7 +320,7 @@ try {
             --runtime nodejs22 `
             --entrypoint dist/handler.handler `
             --memory 256MB `
-            --execution-timeout 15s `
+            --execution-timeout 35s `
             --concurrency 1 `
             --service-account-id $ServiceAccountId `
             --source-path '.artifacts/function.zip' `
@@ -274,10 +381,32 @@ try {
         Invoke-YcQuiet @('serverless', 'trigger', 'update', 'timer', $TriggerName, '--new-cron-expression', $CronExpression, '--new-payload', $TriggerPayload, '--new-invoke-function-name', $FunctionName, '--new-invoke-function-tag', 'stable', '--new-invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger convergence'
     }
 
-    $env:FUNCTION_URL = "https://functions.yandexcloud.net/$FunctionId`?tag=stable"
-    & node scripts/set-webhook.mjs
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Telegram webhook setup failed.'
+    $PreviousYandexFunctionUrl = [Environment]::GetEnvironmentVariable('YANDEX_FUNCTION_URL', 'Process')
+    try {
+        $env:YANDEX_FUNCTION_URL = "https://functions.yandexcloud.net/$FunctionId`?tag=stable"
+        $CloudflareDeployment = & (Join-Path $PSScriptRoot 'deploy-cloudflare.ps1')
+        if ($null -eq $CloudflareDeployment) {
+            throw 'Cloudflare ingress deployment failed.'
+        }
+        $CloudflarePreviousVersionId = [string]$CloudflareDeployment.PreviousVersionId
+        $CloudflareDeployed = $true
+        if ([string]$CloudflareDeployment.WorkerUrl -ne $CloudflareWebhookUrl) {
+            throw 'Cloudflare ingress deployment returned an unexpected URL.'
+        }
+        $env:FUNCTION_URL = $CloudflareWebhookUrl
+        $WebhookSetupAttempted = $true
+        & node scripts/set-webhook.mjs
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Telegram webhook setup failed.'
+        }
+    }
+    finally {
+        if ($null -eq $PreviousYandexFunctionUrl) {
+            Remove-Item Env:YANDEX_FUNCTION_URL -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:YANDEX_FUNCTION_URL = $PreviousYandexFunctionUrl
+        }
     }
 
     Write-Output "Stable URL: $env:FUNCTION_URL"
@@ -289,6 +418,7 @@ try {
     Write-Output 'Next manual action: /setup'
 }
 catch {
+    $OriginalError = $_
     if ($StableMoved) {
         if (-not [string]::IsNullOrWhiteSpace($PreviousStableVersionId)) {
             Write-Output "Previous stable version ID: $PreviousStableVersionId"
@@ -298,7 +428,70 @@ catch {
             Write-Output 'Previous stable version: none (first deployment); rollback tag is unavailable.'
         }
     }
-    throw
+    [void](Invoke-ProductionRollback `
+        -StableMoved $StableMoved `
+        -PreviousStableVersionId $PreviousStableVersionId `
+        -CloudflareDeployed $CloudflareDeployed `
+        -PreviousCloudflareVersionId $CloudflarePreviousVersionId `
+        -WebhookSetupAttempted $WebhookSetupAttempted `
+        -PreviousWebhookSecret $PreviousWebhookSecret `
+        -PreviousWebhookUrl $PreviousTelegramWebhookUrl `
+        -RestoredYandexFunctionUrl "https://functions.yandexcloud.net/$FunctionId`?tag=stable" `
+        -YandexRollback {
+            param($VersionId)
+            Invoke-YcQuiet @(
+                'serverless',
+                'function',
+                'version',
+                'set-tag',
+                '--id',
+                $VersionId,
+                '--tag',
+                'stable'
+            ) 'Automatic stable version rollback'
+        } `
+        -CloudflareRollback {
+            param($VersionId)
+            & (Join-Path $PSScriptRoot 'deploy-cloudflare.ps1') `
+                -RollbackVersionId $VersionId
+        } `
+        -FirstCloudflareRollback {
+            param($Secret, $YandexFunctionUrl)
+            $ProcessWebhookSecret = [Environment]::GetEnvironmentVariable(
+                'WEBHOOK_SECRET',
+                'Process'
+            )
+            $ProcessYandexFunctionUrl = [Environment]::GetEnvironmentVariable(
+                'YANDEX_FUNCTION_URL',
+                'Process'
+            )
+            try {
+                $env:WEBHOOK_SECRET = $Secret
+                $env:YANDEX_FUNCTION_URL = $YandexFunctionUrl
+                & (Join-Path $PSScriptRoot 'deploy-cloudflare.ps1') `
+                    -RestoreSecretsOnly
+            }
+            finally {
+                if ($null -eq $ProcessWebhookSecret) {
+                    Remove-Item Env:WEBHOOK_SECRET -ErrorAction SilentlyContinue
+                }
+                else {
+                    $env:WEBHOOK_SECRET = $ProcessWebhookSecret
+                }
+                if ($null -eq $ProcessYandexFunctionUrl) {
+                    Remove-Item Env:YANDEX_FUNCTION_URL -ErrorAction SilentlyContinue
+                }
+                else {
+                    $env:YANDEX_FUNCTION_URL = $ProcessYandexFunctionUrl
+                }
+            }
+        } `
+        -TelegramRollback {
+            param($Secret, $Url)
+            Set-TelegramWebhookConfiguration $BotToken $Secret $Url
+        }
+    )
+    throw $OriginalError
 }
 finally {
     Pop-Location

@@ -3,12 +3,12 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 // @ts-expect-error The production utility intentionally ships as native ESM.
-import { getWebhookInfo, setWebhook } from '../../scripts/set-webhook.mjs';
+import { getWebhookInfo, loadInput, setWebhook } from '../../scripts/set-webhook.mjs';
 
 const input = {
   botToken: '123456789:' + 'abcdefghijklmnopqrstuvwxyzABCDEFGH_12',
   webhookSecret: 'valid_secret_1234567890',
-  functionUrl: 'https://functions.yandexcloud.net/function-id?tag=stable',
+  functionUrl: 'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram',
 };
 
 describe('setWebhook', () => {
@@ -29,10 +29,11 @@ describe('setWebhook', () => {
       headers: { 'content-type': 'application/json' },
     });
     expect(JSON.parse(fetcher.mock.calls[0]![1]!.body as string)).toEqual({
-      url: 'https://functions.yandexcloud.net/function-id?tag=stable',
+      url: 'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram',
       secret_token: 'valid_secret_1234567890',
       allowed_updates: ['message', 'callback_query'],
       drop_pending_updates: false,
+      max_connections: 1,
     });
   });
 
@@ -93,6 +94,42 @@ describe('setWebhook', () => {
   });
 });
 
+describe('loadInput', () => {
+  it('accepts the exact Cloudflare Worker route used for the durable ingress', () => {
+    expect(loadInput({
+      BOT_TOKEN: input.botToken,
+      WEBHOOK_SECRET: input.webhookSecret,
+      FUNCTION_URL: 'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram',
+    }).functionUrl).toBe(
+      'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram',
+    );
+  });
+
+  it('rejects a lookalike Cloudflare Worker host', () => {
+    expect(() => loadInput({
+      BOT_TOKEN: input.botToken,
+      WEBHOOK_SECRET: input.webhookSecret,
+      FUNCTION_URL: 'https://worker.account.workers.dev.evil.example/telegram',
+    })).toThrow('Invalid FUNCTION_URL');
+  });
+
+  it('rejects a different but syntactically valid Workers host', () => {
+    expect(() => loadInput({
+      BOT_TOKEN: input.botToken,
+      WEBHOOK_SECRET: input.webhookSecret,
+      FUNCTION_URL: 'https://friday-football-bot-ingress.other-account.workers.dev/telegram',
+    })).toThrow('Invalid FUNCTION_URL');
+  });
+
+  it('rejects bypassing the durable ingress with a direct function URL', () => {
+    expect(() => loadInput({
+      BOT_TOKEN: input.botToken,
+      WEBHOOK_SECRET: input.webhookSecret,
+      FUNCTION_URL: 'https://functions.yandexcloud.net/function-id?tag=stable',
+    })).toThrow('Invalid FUNCTION_URL');
+  });
+});
+
 describe('getWebhookInfo', () => {
   it('returns a verified pending update count', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -110,7 +147,7 @@ describe('getWebhookInfo', () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       ok: true,
       result: {
-        url: 'https://functions.yandexcloud.net/other?tag=stable',
+        url: 'https://other-worker.other-account.workers.dev/telegram',
         pending_update_count: 0,
       },
     }), { status: 200 }));

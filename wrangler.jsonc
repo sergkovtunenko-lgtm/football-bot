@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "friday-football-bot-ingress",
+  "account_id": "bc943bc020989d605918cb0ac6b8e56b",
+  "main": "cloudflare/worker.mjs",
+  "compatibility_date": "2026-07-27",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "TELEGRAM_UPDATES",
+        "queue": "friday-football-bot-updates"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "friday-football-bot-updates",
+        "max_batch_size": 1,
+        "max_batch_timeout": 0,
+        "max_retries": 50,
+        "retry_delay": 30,
+        "dead_letter_queue": "friday-football-bot-updates-dlq",
+        "max_concurrency": 1
+      }
+    ]
+  }
+}

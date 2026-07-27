@@ -3,9 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
-  "engines": { "node": ">=22 <23" },
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "cloudflare:dry-run": "wrangler deploy --dry-run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -22,6 +25,7 @@
     "@types/node": "22.20.1",
     "@vitest/coverage-v8": "4.1.10",
     "typescript": "7.0.2",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "wrangler": "4.114.0"
   }
 }

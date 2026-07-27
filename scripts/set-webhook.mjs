@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url';
 
 const TOKEN_PATTERN = /^\d{8,12}:[A-Za-z0-9_-]{30,}$/;
 const SECRET_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
+const PRODUCTION_WEBHOOK_URL =
+  'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram';
 
 export async function setWebhook(fetcher, input) {
   const response = await fetchSafely(fetcher, methodUrl(input.botToken, 'setWebhook'), {
@@ -12,6 +14,7 @@ export async function setWebhook(fetcher, input) {
       secret_token: input.webhookSecret,
       allowed_updates: ['message', 'callback_query'],
       drop_pending_updates: false,
+      max_connections: 1,
     }),
   });
   const payload = await readPayload(response);
@@ -58,8 +61,8 @@ export function loadInput(env = process.env) {
     parsedUrl.protocol !== 'https:'
     || parsedUrl.username !== ''
     || parsedUrl.password !== ''
-    || parsedUrl.hostname !== 'functions.yandexcloud.net'
-    || parsedUrl.searchParams.get('tag') !== 'stable'
+    || parsedUrl.hash !== ''
+    || parsedUrl.toString() !== PRODUCTION_WEBHOOK_URL
   ) {
     throw new Error('Invalid FUNCTION_URL');
   }
