@@ -1,3 +1,45 @@
+function Get-YcJsonOrNull {
+    param(
+        [Parameter(Mandatory)][string[]] $Arguments,
+        [Parameter(Mandatory)][string] $Description,
+        [string] $ExecutablePath = 'yc'
+    )
+
+    $StdoutPath = [IO.Path]::GetTempFileName()
+    $StderrPath = [IO.Path]::GetTempFileName()
+    try {
+        $PreviousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $ExecutablePath @Arguments 1> $StdoutPath 2> $StderrPath
+            $ExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $PreviousErrorActionPreference
+        }
+
+        $StdoutText = [IO.File]::ReadAllText($StdoutPath)
+        if ($ExitCode -eq 0) {
+            try {
+                return $StdoutText | ConvertFrom-Json
+            }
+            catch {
+                throw "$Description returned invalid JSON."
+            }
+        }
+
+        $StderrText = [IO.File]::ReadAllText($StderrPath)
+        $DiagnosticText = "$StdoutText`n$StderrText"
+        if ($DiagnosticText -match '(?i)(not[ _-]?found|does not exist)') {
+            return $null
+        }
+        throw "$Description failed."
+    }
+    finally {
+        Remove-Item -LiteralPath $StdoutPath, $StderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function ConvertTo-RuntimeAdminIds {
     param([Parameter(Mandatory)][string] $AdminIds)
     if ($AdminIds -notmatch '^-?\d+(,-?\d+)*$') {

@@ -1,7 +1,13 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const repositoryRoot = resolve(__dirname, '../..');
 const deployPath = resolve(repositoryRoot, 'scripts/deploy.ps1');
@@ -44,11 +50,100 @@ describe('deploy safety contract', () => {
     expect(deploySource).toContain('$YdbRestIamToken = $null');
     expect(deploySource).toContain('Assert-YdbDatabaseConfiguration $Database');
   });
+
+  it('uses the tested yc JSON helper instead of shadowing it in the deploy script', () => {
+    expect(deploySource).not.toContain('function Get-YcJsonOrNull');
+  });
 });
 
 describe.skipIf(process.platform !== 'win32')('deploy PowerShell helpers', () => {
   const escapedHelperPath = helperPath.replaceAll("'", "''");
   const powerShellTestTimeout = 15_000;
+  let fakeYcDirectory: string;
+  let escapedFakeYcPath: string;
+
+  beforeAll(() => {
+    fakeYcDirectory = mkdtempSync(join(tmpdir(), 'football-bot-fake-yc-'));
+    const fakeYcPath = join(fakeYcDirectory, 'yc.cmd');
+    writeFileSync(fakeYcPath, [
+      '@echo off',
+      'if "%~1"=="success" (',
+      '  echo {"id":"service-account-test"}',
+      '  >&2 echo unable to rotate logs at C:\\sensitive\\yc.log: file in use',
+      '  exit /b 0',
+      ')',
+      'if "%~1"=="not-found" (',
+      '  echo lookup output contained sensitive-account-id',
+      '  >&2 echo service account does not exist: sensitive-account-id',
+      '  exit /b 1',
+      ')',
+      'echo lookup output contained sensitive-account-id',
+      '>&2 echo permission denied for C:\\sensitive\\yc.log and sensitive-account-id',
+      'exit /b 2',
+      '',
+    ].join('\r\n'), 'utf8');
+    escapedFakeYcPath = fakeYcPath.replaceAll("'", "''");
+  });
+
+  afterAll(() => {
+    rmSync(fakeYcDirectory, { recursive: true, force: true });
+  });
+
+  it('parses stdout JSON when yc exits zero despite a stderr warning', () => {
+    const command = `
+      . '${escapedHelperPath}'
+      Get-YcJsonOrNull -Arguments @('success') -Description 'Service account lookup' -ExecutablePath '${escapedFakeYcPath}' |
+        ConvertTo-Json -Compress
+    `;
+    const output = execFileSync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ], { encoding: 'utf8' }).trim();
+
+    expect(JSON.parse(output)).toEqual({ id: 'service-account-test' });
+    expect(output).not.toContain('unable to rotate logs');
+    expect(output).not.toContain('C:\\sensitive\\yc.log');
+  }, powerShellTestTimeout);
+
+  it('returns null for a nonzero yc not-found response without leaking diagnostics', () => {
+    const command = `
+      . '${escapedHelperPath}'
+      $result = Get-YcJsonOrNull -Arguments @('not-found') -Description 'Service account lookup' -ExecutablePath '${escapedFakeYcPath}'
+      if ($null -ne $result) { exit 9 }
+      [Console]::Out.Write('null')
+    `;
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ], { encoding: 'utf8' });
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status).toBe(0);
+    expect(output).toBe('null');
+    expect(output).not.toContain('sensitive-account-id');
+  }, powerShellTestTimeout);
+
+  it('throws the fixed description for other nonzero yc failures without leaking diagnostics', () => {
+    const command = `
+      . '${escapedHelperPath}'
+      try {
+        Get-YcJsonOrNull -Arguments @('failure') -Description 'Service account lookup' -ExecutablePath '${escapedFakeYcPath}'
+        exit 0
+      }
+      catch {
+        [Console]::Out.Write($_.Exception.Message)
+        exit 7
+      }
+    `;
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ], { encoding: 'utf8' });
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status).toBe(7);
+    expect(output).toBe('Service account lookup failed.');
+    expect(output).not.toContain('permission denied');
+    expect(output).not.toContain('C:\\sensitive\\yc.log');
+    expect(output).not.toContain('sensitive-account-id');
+  }, powerShellTestTimeout);
 
   it('preserves every admin ID using a map-safe separator', () => {
     const command = `. '${escapedHelperPath}'; ConvertTo-RuntimeAdminIds '111,222,-333'`;

@@ -62,35 +62,6 @@ function Invoke-YcText {
     return ($Output -join "`n").Trim()
 }
 
-function Get-YcJsonOrNull {
-    param(
-        [Parameter(Mandatory)][string[]] $Arguments,
-        [Parameter(Mandatory)][string] $Description
-    )
-    $PreviousErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $Output = & yc @Arguments 2>&1
-        $ExitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $PreviousErrorActionPreference
-    }
-    $Text = ($Output | ForEach-Object { $_.ToString() }) -join "`n"
-    if ($ExitCode -eq 0) {
-        try {
-            return $Text | ConvertFrom-Json
-        }
-        catch {
-            throw "$Description returned invalid JSON."
-        }
-    }
-    if ($Text -match '(?i)(not[ _-]?found|does not exist)') {
-        return $null
-    }
-    throw "$Description failed."
-}
-
 function Wait-FunctionVersionActive {
     param([Parameter(Mandatory)][string] $VersionId)
     $Deadline = [DateTime]::UtcNow.AddMinutes(5)
