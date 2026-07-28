@@ -7,12 +7,8 @@ import {
 } from './bot-service';
 import type { FootballStore } from '../ports/store';
 import type { TelegramPort } from '../ports/telegram';
-import {
-  renderRegistrationCard,
-  renderStatus,
-} from '../adapters/telegram/render';
+import { renderStatus } from '../adapters/telegram/render';
 import { logError } from '../logger';
-import type { RegistrationView } from './views';
 
 type RouterService = Pick<BotService,
   | 'setup'
@@ -156,13 +152,11 @@ export class UpdateRouter {
         const data = callback.data;
         const registration = registrationCallback(data);
         const team = winCallback(data);
-        const isRegistrationAction = registration !== undefined || data === 'v1:r:list';
         const isScoreAction = team !== undefined || data === 'v1:w:undo'
           || data === 'v1:w:finish' || data === 'v1:w:confirm_finish';
-        let registrationSnapshot: RegistrationView | undefined;
-        if (isRegistrationAction) {
-          registrationSnapshot = await this.service.registrationView();
-          const session = await this.store.transact((tx) => tx.getSession(registrationSnapshot!.sessionId));
+        if (registration !== undefined) {
+          const registrationSnapshot = await this.service.registrationView();
+          const session = await this.store.transact((tx) => tx.getSession(registrationSnapshot.sessionId));
           if (session?.registrationMessageId !== message.messageId) {
             answer = 'Эта кнопка уже неактуальна';
             showAlert = true;
@@ -180,8 +174,6 @@ export class UpdateRouter {
           // Freshness failures are answered below without invoking business state changes.
         } else if (registration !== undefined) {
           await this.service.setParty(updateId, playerFrom(callback.from), registration);
-        } else if (data === 'v1:r:list') {
-          await this.telegram.sendMessage(message.chatId, renderRegistrationCard(registrationSnapshot!));
         } else if (team !== undefined) {
           this.requireAdmin(callback.from.id);
           await this.service.recordWin(updateId, callback.from.id, team);

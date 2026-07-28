@@ -142,12 +142,12 @@ describe('UpdateRouter callbacks', () => {
     expect(telegram.answerCallback).toHaveBeenCalledTimes(1);
   });
 
-  it('routes the fresh registration list and answers exactly once', async () => {
+  it('does not publish a registration card for the removed list callback', async () => {
     const { router, service, telegram } = fixture();
     await router.handle(callback('v1:r:list'));
-    expect(service.registrationView).toHaveBeenCalledOnce();
-    expect(telegram.sendMessage).toHaveBeenCalledWith('-1001', expect.stringContaining('Игрок'));
-    expect(telegram.answerCallback).toHaveBeenCalledTimes(1);
+    expect(service.registrationView).not.toHaveBeenCalled();
+    expect(telegram.sendMessage).not.toHaveBeenCalled();
+    expect(telegram.answerCallback).toHaveBeenCalledWith('cq', 'Кнопка не поддерживается', undefined);
   });
 
   it.each([1, 2, 3, 4] as const)('routes one-tap team %i win and answers exactly once', async (team) => {

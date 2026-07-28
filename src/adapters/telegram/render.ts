@@ -58,7 +58,6 @@ export function registrationKeyboard(): InlineKeyboard {
   return { inline_keyboard: [
     [{ text: '✅ Иду один', callback_data: 'v1:r:1' }, { text: '👥 Я +1', callback_data: 'v1:r:2' }],
     [{ text: '👥 Я +2', callback_data: 'v1:r:3' }, { text: '❌ Отменить', callback_data: 'v1:r:0' }],
-    [{ text: '📋 Состав', callback_data: 'v1:r:list' }],
   ] };
 }
 
