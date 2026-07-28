@@ -80,6 +80,11 @@ describe('deploy safety contract', () => {
     expect(deploySource).not.toContain('--execution-timeout 15s');
   });
 
+  it('identifies an existing timer by its resolved ID', () => {
+    expect(deploySource).toContain("'trigger', 'update', 'timer', '--id', ([string]$Trigger.id)");
+    expect(deploySource).not.toContain("'trigger', 'update', 'timer', '--name', $TriggerName");
+  });
+
   it('disables redirects for the candidate probe that carries the webhook secret', () => {
     const probeStart = deploySource.indexOf('function Invoke-WebhookProbe');
     const probeEnd = deploySource.indexOf('function Invoke-TelegramBotApiJson');

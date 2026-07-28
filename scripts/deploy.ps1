@@ -378,7 +378,7 @@ try {
         Invoke-YcQuiet @('serverless', 'trigger', 'create', 'timer', '--name', $TriggerName, '--cron-expression', $CronExpression, '--payload', $TriggerPayload, '--invoke-function-name', $FunctionName, '--invoke-function-tag', 'stable', '--invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger creation'
     }
     else {
-        Invoke-YcQuiet @('serverless', 'trigger', 'update', 'timer', $TriggerName, '--new-cron-expression', $CronExpression, '--new-payload', $TriggerPayload, '--new-invoke-function-name', $FunctionName, '--new-invoke-function-tag', 'stable', '--new-invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger convergence'
+        Invoke-YcQuiet @('serverless', 'trigger', 'update', 'timer', '--id', ([string]$Trigger.id), '--new-cron-expression', $CronExpression, '--new-payload', $TriggerPayload, '--new-invoke-function-name', $FunctionName, '--new-invoke-function-tag', 'stable', '--new-invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger convergence'
     }
 
     $PreviousYandexFunctionUrl = [Environment]::GetEnvironmentVariable('YANDEX_FUNCTION_URL', 'Process')
