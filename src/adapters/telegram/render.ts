@@ -41,23 +41,38 @@ function teamLabel(teamNumber: 1 | 2 | 3 | 4): string {
 
 export function renderRegistrationCard(view: RegistrationView): string {
   return [
-    heading(view.sessionId),
+    '<b>🏟️⚽ МАТЧ-ЦЕНТР · ПИНГВИН</b>',
+    '<i>🌆 ПЯТНИЧНЫЙ ФУТБОЛЬНЫЙ ВЕЧЕР</i>',
+    `📅 ${russianDate(view.sessionId)} · <b>21:00</b>`,
+    '📍 Манеж «Пингвин»',
     '',
-    `<b>Запись открыта</b> · ${view.active.length} из ${view.maxActive}`,
+    '<b>📋 РЕГЛАМЕНТ</b>',
+    '👥 Записывайтесь кнопками ниже: один, с другом или втроём; если планы изменились — нажмите «Отменить».',
+    '🚦 Первые 20 человек играют, остальные ждут в резерве и автоматически поднимаются, когда освобождается место.',
+    '🎲 В пятницу в 20:55 бот закрывает запись и случайным образом формирует команды.',
+    '⏱️ Играем до 5 минут или 2 голов, а 🏆 победа идёт в личную статистику каждого игрока команды.',
+    '',
+    `<b>🟢 РЕГИСТРАЦИЯ · ${view.active.length}/${view.maxActive}</b>`,
     progressBar(view.active.length, view.maxActive),
     '',
-    '<b>Основной состав</b>',
+    `<b>🔥 ОСНОВА · ${view.active.length}</b>`,
     names(view.active),
     '',
-    `<b>Общий резерв</b> (${view.waitlist.length})`,
+    `<b>⏳ РЕЗЕРВ · ${view.waitlist.length}</b>`,
     names(view.waitlist),
   ].join('\n');
 }
 
 export function registrationKeyboard(): InlineKeyboard {
   return { inline_keyboard: [
-    [{ text: '✅ Иду один', callback_data: 'v1:r:1' }, { text: '👥 Я +1', callback_data: 'v1:r:2' }],
-    [{ text: '👥 Я +2', callback_data: 'v1:r:3' }, { text: '❌ Отменить', callback_data: 'v1:r:0' }],
+    [
+      { text: '⚽ Иду один', callback_data: 'v1:r:1', style: 'success' },
+      { text: '🤝 Я +1', callback_data: 'v1:r:2', style: 'primary' },
+    ],
+    [
+      { text: '👥 Я +2', callback_data: 'v1:r:3', style: 'primary' },
+      { text: '🚫 Отменить', callback_data: 'v1:r:0', style: 'danger' },
+    ],
   ] };
 }
 

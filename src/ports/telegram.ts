@@ -1,5 +1,9 @@
 export interface InlineKeyboard {
-  inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+  inline_keyboard: Array<Array<{
+    text: string;
+    callback_data: string;
+    style?: 'success' | 'primary' | 'danger';
+  }>>;
 }
 
 export interface SentMessage { messageId: string; }

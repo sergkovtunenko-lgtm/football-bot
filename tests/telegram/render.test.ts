@@ -19,24 +19,50 @@ describe('Telegram rendering', () => {
     expect(escapeHtml('<Иван & "Ко\'т">')).toBe('&lt;Иван &amp; &quot;Ко&#39;т&quot;&gt;');
   });
 
-  it('shows venue, time, progress, active list, and waitlist', () => {
+  it('renders the approved match-center hierarchy with venue, time, progress, active list, and waitlist', () => {
     const text = renderRegistrationCard({
       sessionId: '2026-07-24',
       active: [{ displayName: '<Иван>' }],
       waitlist: [{ displayName: 'Пётр' }],
       maxActive: 20,
     });
+    expect(text).toContain('<b>🏟️⚽ МАТЧ-ЦЕНТР · ПИНГВИН</b>');
+    expect(text).toContain('🌆 ПЯТНИЧНЫЙ ФУТБОЛЬНЫЙ ВЕЧЕР');
+    expect(text).not.toContain('НОЧЬ');
     expect(text).toContain('Манеж «Пингвин»');
     expect(text).toContain('21:00');
-    expect(text).toContain('1 из 20');
+    expect(text).toContain('РЕГИСТРАЦИЯ · 1/20');
     expect(text).toContain('&lt;Иван&gt;');
-    expect(text).toContain('Общий резерв');
+    expect(text).toContain('🔥 ОСНОВА · 1');
+    expect(text).toContain('⏳ РЕЗЕРВ · 1');
+  });
+
+  it('explains signup, reserve promotion, random teams, and personal wins in the registration card and reminder', () => {
+    const view = {
+      sessionId: '2026-07-24',
+      active: [],
+      waitlist: [],
+      maxActive: 20,
+    } as const;
+
+    for (const text of [renderRegistrationCard(view), renderReminder(view)]) {
+      expect(text).toContain('👥 Записывайтесь кнопками ниже');
+      expect(text).toContain('🚦 Первые 20 человек играют');
+      expect(text).toContain('🎲 В пятницу в 20:55');
+      expect(text).toContain('🏆 победа идёт в личную статистику');
+    }
   });
 
   it('uses versioned compact callback data', () => {
     expect(registrationKeyboard()).toEqual({ inline_keyboard: [
-      [{ text: '✅ Иду один', callback_data: 'v1:r:1' }, { text: '👥 Я +1', callback_data: 'v1:r:2' }],
-      [{ text: '👥 Я +2', callback_data: 'v1:r:3' }, { text: '❌ Отменить', callback_data: 'v1:r:0' }],
+      [
+        { text: '⚽ Иду один', callback_data: 'v1:r:1', style: 'success' },
+        { text: '🤝 Я +1', callback_data: 'v1:r:2', style: 'primary' },
+      ],
+      [
+        { text: '👥 Я +2', callback_data: 'v1:r:3', style: 'primary' },
+        { text: '🚫 Отменить', callback_data: 'v1:r:0', style: 'danger' },
+      ],
     ] });
   });
 
