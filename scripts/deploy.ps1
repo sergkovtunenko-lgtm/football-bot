@@ -91,7 +91,7 @@ function Invoke-WebhookProbe {
     $Handler = [System.Net.Http.HttpClientHandler]::new()
     $Handler.AllowAutoRedirect = $false
     $Client = [System.Net.Http.HttpClient]::new($Handler)
-    $Client.Timeout = [TimeSpan]::FromSeconds(20)
+    $Client.Timeout = [TimeSpan]::FromSeconds(90)
     $Request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, $Url)
     try {
         [void]$Request.Headers.TryAddWithoutValidation('X-Telegram-Bot-Api-Secret-Token', $Secret)
