@@ -152,7 +152,7 @@ export class OutboxWorker {
             sessionId: effect.sessionId,
             messages: [{
               html: renderRegistrationCard(view),
-              keyboard: registrationKeyboard(),
+              keyboard: registrationKeyboard(view.sessionId),
               ...(session.registrationMessageId === undefined ? {
                 messageSlot: 'registrationMessageId' as const, pinWhenCreated: true,
               } : { existingMessageId: session.registrationMessageId }),
@@ -160,11 +160,12 @@ export class OutboxWorker {
           };
         }
         case 'reminder':
+          const view = await registrationView(tx, effect.sessionId);
           return {
             chatId: groupChatId,
             messages: [{
-              html: renderReminder(await registrationView(tx, effect.sessionId)),
-              keyboard: registrationKeyboard(),
+              html: renderReminder(view),
+              keyboard: registrationKeyboard(view.sessionId),
             }],
           };
         case 'promotion_notice': {

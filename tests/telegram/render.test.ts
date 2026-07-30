@@ -54,14 +54,14 @@ describe('Telegram rendering', () => {
   });
 
   it('uses versioned compact callback data', () => {
-    expect(registrationKeyboard()).toEqual({ inline_keyboard: [
+    expect(registrationKeyboard('2026-07-24')).toEqual({ inline_keyboard: [
       [
-        { text: '⚽ Иду один', callback_data: 'v1:r:1', style: 'success' },
-        { text: '🤝 Я +1', callback_data: 'v1:r:2', style: 'primary' },
+        { text: '⚽ Иду один', callback_data: 'v2:r:2026-07-24:1', style: 'success' },
+        { text: '🤝 Я +1', callback_data: 'v2:r:2026-07-24:2', style: 'primary' },
       ],
       [
-        { text: '👥 Я +2', callback_data: 'v1:r:3', style: 'primary' },
-        { text: '🚫 Отменить', callback_data: 'v1:r:0', style: 'danger' },
+        { text: '👥 Я +2', callback_data: 'v2:r:2026-07-24:3', style: 'primary' },
+        { text: '🚫 Отменить', callback_data: 'v2:r:2026-07-24:0', style: 'danger' },
       ],
     ] });
   });

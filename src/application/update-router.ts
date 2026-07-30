@@ -13,6 +13,7 @@ import { logError } from '../logger';
 type RouterService = Pick<BotService,
   | 'setup'
   | 'openNow'
+  | 'remindNow'
   | 'setParty'
   | 'closeNow'
   | 'recordWin'
@@ -49,6 +50,11 @@ interface ParsedUpdate {
   updateId: string;
   message?: ParsedMessage;
   callback?: ParsedCallback;
+}
+
+interface RegistrationCallback {
+  partySize: 0 | 1 | 2 | 3;
+  sessionId?: string;
 }
 
 class UpdateValidationError extends Error {}
@@ -127,6 +133,9 @@ export class UpdateRouter {
       case '/open':
         await this.service.openNow(updateId, actor.id);
         break;
+      case '/remind':
+        await this.service.remindNow(updateId, actor.id);
+        break;
       case '/close':
         await this.service.closeNow(updateId, actor.id);
         break;
@@ -157,7 +166,10 @@ export class UpdateRouter {
         if (registration !== undefined) {
           const registrationSnapshot = await this.service.registrationView();
           const session = await this.store.transact((tx) => tx.getSession(registrationSnapshot.sessionId));
-          if (session?.registrationMessageId !== message.messageId) {
+          const currentScopedButton = registration.sessionId === registrationSnapshot.sessionId;
+          const currentLegacyButton = registration.sessionId === undefined
+            && session?.registrationMessageId === message.messageId;
+          if (session?.status !== 'registration_open' || (!currentScopedButton && !currentLegacyButton)) {
             answer = 'Эта кнопка уже неактуальна';
             showAlert = true;
           }
@@ -173,7 +185,7 @@ export class UpdateRouter {
         if (showAlert === true) {
           // Freshness failures are answered below without invoking business state changes.
         } else if (registration !== undefined) {
-          await this.service.setParty(updateId, playerFrom(callback.from), registration);
+          await this.service.setParty(updateId, playerFrom(callback.from), registration.partySize);
         } else if (team !== undefined) {
           this.requireAdmin(callback.from.id);
           await this.service.recordWin(updateId, callback.from.id, team);
@@ -237,7 +249,7 @@ export class UpdateRouter {
   }
 }
 
-type RecoveryCommand = '/setup' | '/status' | '/open' | '/close' | '/undo' | '/finish';
+type RecoveryCommand = '/setup' | '/status' | '/open' | '/remind' | '/close' | '/undo' | '/finish';
 
 function finishConfirmationKeyboard() {
   return { inline_keyboard: [[
@@ -309,11 +321,15 @@ function registrationToken(text: string): 0 | 1 | 2 | 3 | '-1' | '-2' | undefine
   }
 }
 
-function registrationCallback(data: string | undefined): 0 | 1 | 2 | 3 | undefined {
-  if (data === 'v1:r:0') return 0;
-  if (data === 'v1:r:1') return 1;
-  if (data === 'v1:r:2') return 2;
-  if (data === 'v1:r:3') return 3;
+function registrationCallback(data: string | undefined): RegistrationCallback | undefined {
+  if (data === 'v1:r:0') return { partySize: 0 };
+  if (data === 'v1:r:1') return { partySize: 1 };
+  if (data === 'v1:r:2') return { partySize: 2 };
+  if (data === 'v1:r:3') return { partySize: 3 };
+  const scoped = /^v2:r:(\d{4}-\d{2}-\d{2}):([0-3])$/.exec(data ?? '');
+  if (scoped?.[1] !== undefined && scoped[2] !== undefined) {
+    return { sessionId: scoped[1], partySize: Number(scoped[2]) as 0 | 1 | 2 | 3 };
+  }
   return undefined;
 }
 
@@ -327,7 +343,7 @@ function winCallback(data: string | undefined): 1 | 2 | 3 | 4 | undefined {
 
 function commandName(text: string): RecoveryCommand | undefined {
   const first = text.split(/\s+/, 1)[0]?.split('@', 1)[0];
-  if (first === '/setup' || first === '/status' || first === '/open'
+  if (first === '/setup' || first === '/status' || first === '/open' || first === '/remind'
     || first === '/close' || first === '/undo' || first === '/finish') return first;
   return undefined;
 }

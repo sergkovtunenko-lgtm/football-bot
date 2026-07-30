@@ -63,15 +63,15 @@ export function renderRegistrationCard(view: RegistrationView): string {
   ].join('\n');
 }
 
-export function registrationKeyboard(): InlineKeyboard {
+export function registrationKeyboard(sessionId: string): InlineKeyboard {
   return { inline_keyboard: [
     [
-      { text: '⚽ Иду один', callback_data: 'v1:r:1', style: 'success' },
-      { text: '🤝 Я +1', callback_data: 'v1:r:2', style: 'primary' },
+      { text: '⚽ Иду один', callback_data: `v2:r:${sessionId}:1`, style: 'success' },
+      { text: '🤝 Я +1', callback_data: `v2:r:${sessionId}:2`, style: 'primary' },
     ],
     [
-      { text: '👥 Я +2', callback_data: 'v1:r:3', style: 'primary' },
-      { text: '🚫 Отменить', callback_data: 'v1:r:0', style: 'danger' },
+      { text: '👥 Я +2', callback_data: `v2:r:${sessionId}:3`, style: 'primary' },
+      { text: '🚫 Отменить', callback_data: `v2:r:${sessionId}:0`, style: 'danger' },
     ],
   ] };
 }

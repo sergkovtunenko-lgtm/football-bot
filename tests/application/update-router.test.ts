@@ -12,13 +12,14 @@ const config: AppConfig = {
 
 function fixture() {
   const session = {
-    sessionId: '2026-07-24', status: 'playing' as const, nextQueuePosition: 1n, nextWinOrdinal: 1n,
+    sessionId: '2026-07-24', status: 'registration_open' as const, nextQueuePosition: 1n, nextWinOrdinal: 1n,
     registrationMessageId: '5', scoreMessageId: '5',
   };
   const service = {
     setup: vi.fn().mockResolvedValue({ duplicate: false }),
     openNow: vi.fn().mockResolvedValue({ duplicate: false }),
     setParty: vi.fn().mockResolvedValue({ duplicate: false }),
+    remindNow: vi.fn().mockResolvedValue({ duplicate: false }),
     closeNow: vi.fn().mockResolvedValue({ duplicate: false }),
     recordWin: vi.fn().mockResolvedValue({ duplicate: false }),
     undoLastWin: vi.fn().mockResolvedValue({ duplicate: false }),
@@ -142,6 +143,26 @@ describe('UpdateRouter callbacks', () => {
     expect(telegram.answerCallback).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts a current-session registration button from a reminder message', async () => {
+    const { router, service, telegram } = fixture();
+    const reminder = callback('v2:r:2026-07-24:2') as any;
+    reminder.callback_query.message.message_id = 999;
+    await router.handle(reminder);
+    expect(service.setParty).toHaveBeenCalledWith('77', {
+      telegramUserId: '900', displayName: 'Admin',
+    }, 2);
+    expect(telegram.answerCallback).toHaveBeenCalledWith('cq', 'Готово', undefined);
+  });
+
+  it('rejects a registration button from a previous session', async () => {
+    const { router, service, telegram } = fixture();
+    const oldReminder = callback('v2:r:2026-07-17:2') as any;
+    oldReminder.callback_query.message.message_id = 999;
+    await router.handle(oldReminder);
+    expect(service.setParty).not.toHaveBeenCalled();
+    expect(telegram.answerCallback).toHaveBeenCalledWith('cq', 'Эта кнопка уже неактуальна', true);
+  });
+
   it('does not publish a registration card for the removed list callback', async () => {
     const { router, service, telegram } = fixture();
     await router.handle(callback('v1:r:list'));
@@ -230,7 +251,8 @@ describe('UpdateRouter callbacks', () => {
 
 describe('UpdateRouter recovery commands and validation', () => {
   it.each([
-    ['/setup', 'setup'], ['/open', 'openNow'], ['/close', 'closeNow'], ['/undo', 'undoLastWin'],
+    ['/setup', 'setup'], ['/open', 'openNow'], ['/remind', 'remindNow'],
+    ['/close', 'closeNow'], ['/undo', 'undoLastWin'],
   ] as const)('routes admin command %s', async (command, method) => {
     const { router, service } = fixture();
     const update = message(command) as any;
@@ -258,7 +280,7 @@ describe('UpdateRouter recovery commands and validation', () => {
     expect(telegram.editMessage).toHaveBeenCalledWith('-1001', '5', expect.stringContaining('Завершить'), expect.any(Object));
   });
 
-  it.each(['/setup', '/status', '/open', '/close', '/undo', '/finish'])('requires admin for %s', async (command) => {
+  it.each(['/setup', '/status', '/open', '/remind', '/close', '/undo', '/finish'])('requires admin for %s', async (command) => {
     const { router, service, telegram } = fixture();
     await router.handle(message(command));
     expect(service.setup).not.toHaveBeenCalled();
@@ -266,13 +288,14 @@ describe('UpdateRouter recovery commands and validation', () => {
     expect(telegram.sendMessage).toHaveBeenCalledWith('-1001', 'Только администратор');
   });
 
-  it.each(['/status', '/open', '/close', '/undo', '/finish'])('ignores %s outside the configured group before admin checks', async (command) => {
+  it.each(['/status', '/open', '/remind', '/close', '/undo', '/finish'])('ignores %s outside the configured group before admin checks', async (command) => {
     const { router, service, telegram } = fixture();
     const update = message(command) as any;
     update.message.chat.id = -2002;
     await router.handle(update);
     expect(service.status).not.toHaveBeenCalled();
     expect(service.openNow).not.toHaveBeenCalled();
+    expect(service.remindNow).not.toHaveBeenCalled();
     expect(service.closeNow).not.toHaveBeenCalled();
     expect(service.undoLastWin).not.toHaveBeenCalled();
     expect(telegram.sendMessage).not.toHaveBeenCalled();
