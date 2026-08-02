@@ -7,7 +7,8 @@ import type { TelegramPort } from '../../src/ports/telegram';
 
 const config: AppConfig = {
   botToken: 'token', webhookSecret: '1234567890abcdef', adminIds: new Set(['900']),
-  ydbConnectionString: 'grpc://local', timeZone: 'Europe/Moscow', maxActiveParticipants: 20,
+  ydbConnectionString: 'grpc://local', telegramApiBaseUrl: 'https://worker.example/telegram-api',
+  timeZone: 'Europe/Moscow', maxActiveParticipants: 20,
 };
 
 function fixture() {

@@ -21,6 +21,8 @@ export class TelegramClient implements TelegramPort {
     private readonly token: string,
     private readonly fetcher: Fetcher = globalThis.fetch,
     private readonly sleep: Sleeper = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    private readonly apiBaseUrl?: string,
+    private readonly gatewaySecret?: string,
   ) {}
 
   async sendMessage(chatId: string, html: string, keyboard?: InlineKeyboard): Promise<SentMessage> {
@@ -43,7 +45,11 @@ export class TelegramClient implements TelegramPort {
   }
 
   async pinMessage(chatId: string, messageId: string): Promise<void> {
-    await this.call('pinChatMessage', { chat_id: chatId, message_id: messageId });
+    await this.call('pinChatMessage', {
+      chat_id: chatId,
+      message_id: messageId,
+      disable_notification: true,
+    });
   }
 
   private async call<T>(method: string, body: Record<string, unknown>): Promise<T> {
@@ -51,8 +57,15 @@ export class TelegramClient implements TelegramPort {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       let response: Response;
       try {
-        response = await this.fetcher(`https://api.telegram.org/bot${this.token}/${method}`, {
-          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(8_000),
+        const headers: Record<string, string> = { 'content-type': 'application/json' };
+        if (this.gatewaySecret !== undefined) {
+          headers['x-telegram-bot-api-secret-token'] = this.gatewaySecret;
+        }
+        const endpoint = this.apiBaseUrl === undefined
+          ? `https://api.telegram.org/bot${this.token}/${method}`
+          : `${this.apiBaseUrl.replace(/\/$/, '')}/${method}`;
+        response = await this.fetcher(endpoint, {
+          method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(8_000),
         });
       } catch {
         if (attempt < delays.length) {

@@ -5,6 +5,26 @@ import { TelegramError } from '../../src/ports/telegram';
 const ok = (result: unknown) => new Response(JSON.stringify({ ok: true, result }), { status: 200 });
 
 describe('TelegramClient', () => {
+  it('uses the configured gateway without putting the bot token in its URL', async () => {
+    const fetcher = vi.fn().mockResolvedValue(ok({ message_id: 7 }));
+    const client = new TelegramClient(
+      'secret-token',
+      fetcher,
+      vi.fn().mockResolvedValue(undefined),
+      'https://worker.example/telegram-api',
+      'gateway_secret_123456',
+    );
+
+    await client.sendMessage('-100', 'text');
+
+    expect(fetcher.mock.calls[0]![0]).toBe('https://worker.example/telegram-api/sendMessage');
+    expect(fetcher.mock.calls[0]![0]).not.toContain('secret-token');
+    expect(fetcher.mock.calls[0]![1].headers).toMatchObject({
+      'content-type': 'application/json',
+      'x-telegram-bot-api-secret-token': 'gateway_secret_123456',
+    });
+  });
+
   it('sends HTML messages as POST JSON and converts the numeric message ID to a string', async () => {
     const fetcher = vi.fn().mockResolvedValue(ok({ message_id: 7 }));
     const client = new TelegramClient('secret-token', fetcher, vi.fn().mockResolvedValue(undefined));
@@ -83,5 +103,16 @@ describe('TelegramClient', () => {
     await new TelegramClient('secret-token', fetcher, vi.fn().mockResolvedValue(undefined)).sendMessage('-100', 'text');
     const request = fetcher.mock.calls[0]![1];
     expect(request.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('pins without notifying group members', async () => {
+    const fetcher = vi.fn().mockResolvedValue(ok(true));
+    await new TelegramClient('secret-token', fetcher, vi.fn().mockResolvedValue(undefined))
+      .pinMessage('-100', '7');
+    expect(JSON.parse(fetcher.mock.calls[0]![1].body as string)).toEqual({
+      chat_id: '-100',
+      message_id: '7',
+      disable_notification: true,
+    });
   });
 });

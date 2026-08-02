@@ -3,6 +3,7 @@ export interface AppConfig {
   webhookSecret: string;
   adminIds: ReadonlySet<string>;
   ydbConnectionString: string;
+  telegramApiBaseUrl: string;
   timeZone: 'Europe/Moscow';
   maxActiveParticipants: 20;
 }
@@ -20,11 +21,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   const adminIds = new Set(required(env, 'ADMIN_IDS').split(/[;,]/).map((id) => id.trim()));
   if ([...adminIds].some((id) => !/^-?\d+$/.test(id))) throw new Error('Invalid ADMIN_IDS');
+  const telegramApiBaseUrl = required(env, 'TELEGRAM_API_BASE_URL');
+  let telegramApiUrl: URL;
+  try {
+    telegramApiUrl = new URL(telegramApiBaseUrl);
+  } catch {
+    throw new Error('Invalid TELEGRAM_API_BASE_URL');
+  }
+  if (
+    telegramApiUrl.protocol !== 'https:'
+    || telegramApiUrl.username !== ''
+    || telegramApiUrl.password !== ''
+    || telegramApiUrl.search !== ''
+    || telegramApiUrl.hash !== ''
+  ) {
+    throw new Error('Invalid TELEGRAM_API_BASE_URL');
+  }
   return {
     botToken: required(env, 'BOT_TOKEN'),
     webhookSecret,
     adminIds,
     ydbConnectionString: required(env, 'YDB_CONNECTION_STRING'),
+    telegramApiBaseUrl: telegramApiBaseUrl.replace(/\/$/, ''),
     timeZone: 'Europe/Moscow',
     maxActiveParticipants: 20,
   };

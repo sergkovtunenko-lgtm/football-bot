@@ -239,7 +239,7 @@ async function initializeProductionDependencies(config: ReturnType<typeof loadCo
   const newId = () => randomUUID();
   const telegram = new TelegramClient(config.botToken, createRetryAfterPreservingFetcher(
     (input, init) => globalThis.fetch(input, init),
-  ));
+  ), undefined, config.telegramApiBaseUrl, config.webhookSecret);
   const service = new BotService(store, clock, random, config.adminIds, newId);
   const scheduler = new Scheduler(store, clock, random, newId);
   const router = new UpdateRouter(service, store, telegram, config);
