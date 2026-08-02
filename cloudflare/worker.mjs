@@ -1,11 +1,22 @@
 const TELEGRAM_PATH = '/telegram';
+const TELEGRAM_API_PREFIX = '/telegram-api/';
 const MAX_UPDATE_BYTES = 128_000;
 const YANDEX_FUNCTION_HOST = 'functions.yandexcloud.net';
+const ALLOWED_TELEGRAM_METHODS = new Set([
+  'sendMessage',
+  'editMessageText',
+  'answerCallbackQuery',
+  'pinChatMessage',
+  'getMe',
+]);
 
 export function createWorker(fetcher) {
   return {
     async fetch(request, env) {
       const url = new URL(request.url);
+      if (url.pathname.startsWith(TELEGRAM_API_PREFIX)) {
+        return handleTelegramApi(request, env, fetcher, url.pathname);
+      }
       if (url.pathname !== TELEGRAM_PATH) {
         return textResponse(404, 'not found');
       }
@@ -91,10 +102,66 @@ export function createWorker(fetcher) {
   };
 }
 
+async function handleTelegramApi(request, env, fetcher, pathname) {
+  const method = pathname.slice(TELEGRAM_API_PREFIX.length);
+  if (!ALLOWED_TELEGRAM_METHODS.has(method)) {
+    return textResponse(404, 'not found');
+  }
+  if (request.method !== 'POST') {
+    return textResponse(405, 'method not allowed', { allow: 'POST' });
+  }
+  if (!validTelegramApiEnvironment(env)) {
+    return textResponse(503, 'unavailable');
+  }
+  const suppliedSecret = request.headers.get('x-telegram-bot-api-secret-token') ?? '';
+  if (!constantTimeEqual(suppliedSecret, env.WEBHOOK_SECRET)) {
+    return textResponse(403, 'forbidden');
+  }
+  const declaredLength = Number(request.headers.get('content-length') ?? '0');
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_UPDATE_BYTES) {
+    return textResponse(413, 'payload too large');
+  }
+  let rawBody;
+  try {
+    rawBody = await request.text();
+  } catch {
+    return textResponse(400, 'bad request');
+  }
+  if (new TextEncoder().encode(rawBody).byteLength > MAX_UPDATE_BYTES) {
+    return textResponse(413, 'payload too large');
+  }
+  try {
+    const payload = JSON.parse(rawBody);
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+      return textResponse(400, 'bad request');
+    }
+  } catch {
+    return textResponse(400, 'bad request');
+  }
+  try {
+    return await fetcher(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'content-type': 'application/json' },
+      body: rawBody,
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    return textResponse(502, 'bad gateway');
+  }
+}
+
 function validSecretEnvironment(env) {
   return typeof env?.WEBHOOK_SECRET === 'string'
     && /^[A-Za-z0-9_-]{16,256}$/.test(env.WEBHOOK_SECRET)
     && typeof env?.TELEGRAM_UPDATES?.send === 'function';
+}
+
+function validTelegramApiEnvironment(env) {
+  return typeof env?.WEBHOOK_SECRET === 'string'
+    && /^[A-Za-z0-9_-]{16,256}$/.test(env.WEBHOOK_SECRET)
+    && typeof env?.BOT_TOKEN === 'string'
+    && /^\d{8,12}:[A-Za-z0-9_-]{20,}$/.test(env.BOT_TOKEN);
 }
 
 function validTelegramUpdate(value) {

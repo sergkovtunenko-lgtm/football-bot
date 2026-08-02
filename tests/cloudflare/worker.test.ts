@@ -4,12 +4,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { createWorker } from '../../cloudflare/worker.mjs';
 
 const SECRET = 'cloudflare_webhook_secret_123';
+const BOT_TOKEN = '123456789:cloudflare_bot_token_value';
 const FUNCTION_URL = 'https://functions.yandexcloud.net/function123?tag=stable';
 
 function environment(send = vi.fn()) {
   return {
     TELEGRAM_UPDATES: { send },
     WEBHOOK_SECRET: SECRET,
+    BOT_TOKEN,
     YANDEX_FUNCTION_URL: FUNCTION_URL,
   };
 }
@@ -34,6 +36,17 @@ function telegramRequest(input: {
           body: input.body
             ?? JSON.stringify({ update_id: 91, message: { text: '/status' } }),
         }),
+  });
+}
+
+function telegramApiRequest(method: string, secret = SECRET, body = '{}', httpMethod = 'POST') {
+  return new Request(`https://bot.example/telegram-api/${method}`, {
+    method: httpMethod,
+    headers: {
+      'content-type': 'application/json',
+      'x-telegram-bot-api-secret-token': secret,
+    },
+    ...(httpMethod === 'GET' ? {} : { body }),
   });
 }
 
@@ -78,6 +91,75 @@ describe('Cloudflare Telegram ingress', () => {
 
     expect(response.status).toBe(status);
     expect(env.TELEGRAM_UPDATES.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('Cloudflare Telegram egress', () => {
+  it('forwards an authenticated allowed method without changing its body', async () => {
+    const telegramResponse = JSON.stringify({ ok: true, result: { id: 1 } });
+    const fetcher = vi.fn().mockResolvedValue(new Response(telegramResponse, {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const body = JSON.stringify({ chat_id: '-1001', text: 'hello' });
+
+    const response = await createWorker(fetcher).fetch(
+      telegramApiRequest('sendMessage', SECRET, body),
+      environment(),
+      {} as never,
+    );
+
+    expect(fetcher).toHaveBeenCalledWith(
+      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+      expect.objectContaining({
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(telegramResponse);
+  });
+
+  it.each([
+    ['missing secret', telegramApiRequest('getMe', ''), 403],
+    ['wrong secret', telegramApiRequest('getMe', 'wrong'), 403],
+    ['unknown method', telegramApiRequest('deleteWebhook'), 404],
+    ['wrong HTTP method', telegramApiRequest('getMe', SECRET, '{}', 'GET'), 405],
+    ['malformed JSON', telegramApiRequest('getMe', SECRET, '{'), 400],
+  ])('rejects %s without contacting Telegram', async (_name, request, status) => {
+    const fetcher = vi.fn();
+    const response = await createWorker(fetcher).fetch(request, environment(), {} as never);
+    expect(response.status).toBe(status);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing Bot API configuration without exposing the token', async () => {
+    const fetcher = vi.fn();
+    const env = { ...environment(), BOT_TOKEN: '' };
+    const response = await createWorker(fetcher).fetch(
+      telegramApiRequest('getMe'),
+      env,
+      {} as never,
+    );
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain(BOT_TOKEN);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('returns Telegram redirects without following them', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('', {
+      status: 302,
+      headers: { location: 'https://attacker.example/collect' },
+    }));
+    const response = await createWorker(fetcher).fetch(
+      telegramApiRequest('getMe'),
+      environment(),
+      {} as never,
+    );
+    expect(fetcher.mock.calls[0]![1]).toMatchObject({ redirect: 'manual' });
+    expect(response.status).toBe(302);
   });
 });
 
