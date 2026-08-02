@@ -250,12 +250,10 @@ function openSession(sessionId: string): Session {
 }
 
 async function completedLeaderboard(tx: FootballTransaction): Promise<LeaderboardRow[]> {
-  const [events, awards, completedSessionIds, players] = await Promise.all([
-    tx.listWinEvents(),
-    tx.listWinAwards(),
-    tx.listCompletedSessionIds(),
-    tx.listPlayers(),
-  ]);
+  const events = await tx.listWinEvents();
+  const awards = await tx.listWinAwards();
+  const completedSessionIds = await tx.listCompletedSessionIds();
+  const players = await tx.listPlayers();
   return buildLeaderboard(
     events,
     awards,

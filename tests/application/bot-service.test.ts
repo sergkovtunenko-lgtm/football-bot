@@ -103,6 +103,17 @@ describe('BotService', () => {
     expect((await app.service.status()).sessionStatus).toBe('playing');
   });
 
+  it('finishes a session without overlapping calls in one store transaction', async () => {
+    const app = fixture();
+    await open(app); await register(app, 10); await app.service.closeNow('close', '900');
+    app.store.rejectConcurrentTransactionCalls();
+
+    const result = await app.service.finish('finish', '900');
+
+    expect(result.duplicate).toBe(false);
+    expect((await app.service.status()).sessionStatus).toBe('finished');
+  });
+
   it('rejects a win for an unknown team', async () => {
     const app = fixture();
     await open(app);

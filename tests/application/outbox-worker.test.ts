@@ -165,6 +165,23 @@ describe('OutboxWorker delivery and semantic snapshots', () => {
     expect(html).not.toContain('raw Telegram secret must not appear');
   });
 
+  it.each([
+    ['teams', { kind: 'teams', sessionId: SESSION_ID } as const, 'playing' as const],
+    ['score panel', { kind: 'score_panel', sessionId: SESSION_ID } as const, 'playing' as const],
+    ['final results', { kind: 'final_results', sessionId: SESSION_ID } as const, 'finished' as const],
+  ])('delivers %s without overlapping calls in one store transaction', async (_label, effect, status) => {
+    const app = fixture();
+    await seed(app, effect, baseSession({ status }));
+    await app.store.transact((tx) => tx.replaceTeams(SESSION_ID, [
+      { sessionId: SESSION_ID, teamNumber: 1 },
+      { sessionId: SESSION_ID, teamNumber: 2 },
+    ], []));
+    app.store.rejectConcurrentTransactionCalls();
+
+    expect(await app.worker.flush()).toEqual({ sent: 1, rescheduled: 0 });
+    expect(pending(app)).toEqual([]);
+  });
+
   it('claims and processes at most one effect at a time in visible order', async () => {
     const app = fixture();
     await app.store.transact(async (tx) => {

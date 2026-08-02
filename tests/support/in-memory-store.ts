@@ -39,11 +39,13 @@ export class InMemoryFootballStore implements FootballStore {
   private queue: Promise<void> = Promise.resolve();
   private rejectNextEnqueue = false;
   private rejectNextReschedule = false;
+  private rejectConcurrentTransactionAccess = false;
 
   transact<T>(work: (tx: FootballTransaction) => Promise<T>): Promise<T> {
     return this.serialized(async () => {
       const clone = structuredClone(this.state);
-      const result = await work(this.transaction(clone));
+      const tx = this.transaction(clone);
+      const result = await work(this.rejectConcurrentTransactionAccess ? concurrencyGuard(tx) : tx);
       this.state = clone;
       return result;
     });
@@ -57,7 +59,8 @@ export class InMemoryFootballStore implements FootballStore {
     return this.serialized(async () => {
       if (this.state.processedUpdates.has(updateId)) return { duplicate: true };
       const clone = structuredClone(this.state);
-      const value = await work(this.transaction(clone));
+      const tx = this.transaction(clone);
+      const value = await work(this.rejectConcurrentTransactionAccess ? concurrencyGuard(tx) : tx);
       clone.processedUpdates.add(updateId);
       this.state = clone;
       return { duplicate: false, value };
@@ -180,6 +183,10 @@ export class InMemoryFootballStore implements FootballStore {
     this.rejectNextReschedule = true;
   }
 
+  rejectConcurrentTransactionCalls(): void {
+    this.rejectConcurrentTransactionAccess = true;
+  }
+
   private transaction(state: State): FootballTransaction {
     return {
       getSettings: async () => structuredClone(state.settings),
@@ -247,6 +254,26 @@ export class InMemoryFootballStore implements FootballStore {
     this.queue = result.then(() => undefined, () => undefined);
     return result;
   }
+}
+
+function concurrencyGuard(transaction: FootballTransaction): FootballTransaction {
+  let active = false;
+  return new Proxy(transaction, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver) as unknown;
+      if (typeof value !== 'function') return value;
+      return async (...args: unknown[]) => {
+        if (active) throw new Error('concurrent transaction call');
+        active = true;
+        try {
+          await Promise.resolve();
+          return await Reflect.apply(value, target, args) as unknown;
+        } finally {
+          active = false;
+        }
+      };
+    },
+  }) as FootballTransaction;
 }
 
 function emptyState(): State {

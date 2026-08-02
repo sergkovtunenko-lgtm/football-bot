@@ -175,10 +175,8 @@ export class OutboxWorker {
           return { chatId: groupChatId, messages: [{ html: renderPromotion(displayName) }] };
         }
         case 'teams': {
-          const [view, participants] = await Promise.all([
-            teamsView(tx, effect.sessionId),
-            tx.listParticipants(effect.sessionId),
-          ]);
+          const view = await teamsView(tx, effect.sessionId);
+          const participants = await tx.listParticipants(effect.sessionId);
           const html = view.teams.length === 0
             ? `${renderTeams(view)}\nУчастников: ${participants.length}`
             : renderTeams(view);
@@ -243,7 +241,8 @@ async function registrationView(tx: FootballTransaction, sessionId: string): Pro
 }
 
 async function teamsView(tx: FootballTransaction, sessionId: string): Promise<TeamsView> {
-  const [teams, members] = await Promise.all([tx.listTeams(sessionId), tx.listTeamMembers(sessionId)]);
+  const teams = await tx.listTeams(sessionId);
+  const members = await tx.listTeamMembers(sessionId);
   return {
     sessionId,
     teams: teams.map((team) => ({
@@ -257,9 +256,8 @@ async function teamsView(tx: FootballTransaction, sessionId: string): Promise<Te
 }
 
 async function scoreView(tx: FootballTransaction, session: Session): Promise<ScoreView> {
-  const [teams, events] = await Promise.all([
-    tx.listTeams(session.sessionId), tx.listWinEvents(session.sessionId),
-  ]);
+  const teams = await tx.listTeams(session.sessionId);
+  const events = await tx.listWinEvents(session.sessionId);
   return {
     sessionId: session.sessionId,
     teams: teams.map((team) => ({
@@ -271,13 +269,11 @@ async function scoreView(tx: FootballTransaction, session: Session): Promise<Sco
 }
 
 async function finalViews(tx: FootballTransaction, sessionId: string) {
-  const [teams, events, awards, completedSessionIds, players] = await Promise.all([
-    tx.listTeams(sessionId),
-    tx.listWinEvents(),
-    tx.listWinAwards(),
-    tx.listCompletedSessionIds(),
-    tx.listPlayers(),
-  ]);
+  const teams = await tx.listTeams(sessionId);
+  const events = await tx.listWinEvents();
+  const awards = await tx.listWinAwards();
+  const completedSessionIds = await tx.listCompletedSessionIds();
+  const players = await tx.listPlayers();
   const wins = dailyPlayerWins(sessionId, events, awards);
   const displayNames = new Map(players.map((player) => [player.telegramUserId, player.displayName]));
   for (const award of awards) if (!displayNames.has(award.telegramUserId)) displayNames.set(award.telegramUserId, award.displayName);
