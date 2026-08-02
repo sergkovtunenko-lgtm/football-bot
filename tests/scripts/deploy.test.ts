@@ -272,6 +272,16 @@ describe.skipIf(process.platform !== 'win32')('deploy PowerShell helpers', () =>
     expect(output).toBe('111;222;-333');
   }, powerShellTestTimeout);
 
+  it('builds no rollback URL before the function ID has been resolved', () => {
+    const command = `. '${escapedHelperPath}'; [Console]::Out.Write((Get-YandexFunctionStableUrl ''))`;
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ], { encoding: 'utf8' });
+
+    expect(result.status).toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toBe('');
+  }, powerShellTestTimeout);
+
   it('restores first-deploy Worker secrets so accepted queue updates can drain', () => {
     const command = `
       . '${escapedHelperPath}'

@@ -227,6 +227,7 @@ $CloudflarePreviousVersionId = $null
 $CloudflareDeployed = $false
 $WebhookSetupAttempted = $false
 $StableMoved = $false
+$FunctionId = ''
 Push-Location -LiteralPath $RepositoryRoot
 try {
     $ServiceAccount = Get-YcJsonOrNull @('iam', 'service-account', 'get', '--name', $ServiceAccountName, '--format', 'json') 'Service account lookup'
@@ -436,7 +437,7 @@ catch {
         -WebhookSetupAttempted $WebhookSetupAttempted `
         -PreviousWebhookSecret $PreviousWebhookSecret `
         -PreviousWebhookUrl $PreviousTelegramWebhookUrl `
-        -RestoredYandexFunctionUrl "https://functions.yandexcloud.net/$FunctionId`?tag=stable" `
+        -RestoredYandexFunctionUrl (Get-YandexFunctionStableUrl $FunctionId) `
         -YandexRollback {
             param($VersionId)
             Invoke-YcQuiet @(

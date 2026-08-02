@@ -48,6 +48,14 @@ function ConvertTo-RuntimeAdminIds {
     return $AdminIds.Replace(',', ';')
 }
 
+function Get-YandexFunctionStableUrl {
+    param([AllowEmptyString()][string] $FunctionId)
+    if ([string]::IsNullOrWhiteSpace($FunctionId)) {
+        return ''
+    }
+    return "https://functions.yandexcloud.net/$FunctionId`?tag=stable"
+}
+
 function Invoke-ProductionRollback {
     param(
         [Parameter(Mandatory)][bool] $StableMoved,
