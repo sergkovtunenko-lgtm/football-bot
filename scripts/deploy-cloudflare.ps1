@@ -11,7 +11,9 @@ Add-Type -AssemblyName System.Net.Http
 
 $QueueName = 'friday-football-bot-updates'
 $DeadLetterQueueName = 'friday-football-bot-updates-dlq'
-$WorkerUrl = 'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram'
+$WorkerBaseUrl = 'https://friday-football-bot-ingress.football-sergei.workers.dev'
+$WorkerUrl = "$WorkerBaseUrl/telegram"
+$TelegramGatewayProbeUrl = "$WorkerBaseUrl/telegram-api/getMe"
 $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $LocalWrangler = Join-Path $RepositoryRoot 'node_modules\.bin\wrangler.cmd'
 if (-not (Test-Path -LiteralPath $LocalWrangler -PathType Leaf)) {
@@ -114,11 +116,13 @@ function Ensure-Queue {
 function Set-WorkerSecrets {
     param(
         [Parameter(Mandatory)][string] $WebhookSecret,
-        [Parameter(Mandatory)][string] $YandexFunctionUrl
+        [Parameter(Mandatory)][string] $YandexFunctionUrl,
+        [Parameter(Mandatory)][string] $BotToken
     )
     $SecretsJson = @{
         WEBHOOK_SECRET = $WebhookSecret
         YANDEX_FUNCTION_URL = $YandexFunctionUrl
+        BOT_TOKEN = $BotToken
     } | ConvertTo-Json -Compress
     $PreviousErrorActionPreference = $ErrorActionPreference
     try {
@@ -132,6 +136,50 @@ function Set-WorkerSecrets {
     }
     if ($ExitCode -ne 0) {
         throw 'Cloudflare Worker secret update failed.'
+    }
+}
+
+function Invoke-TelegramGatewayProbe {
+    param([Parameter(Mandatory)][string] $Secret)
+    $Handler = [System.Net.Http.HttpClientHandler]::new()
+    $Handler.AllowAutoRedirect = $false
+    $Client = [System.Net.Http.HttpClient]::new($Handler)
+    $Client.Timeout = [TimeSpan]::FromSeconds(20)
+    $Request = [System.Net.Http.HttpRequestMessage]::new(
+        [System.Net.Http.HttpMethod]::Post,
+        $TelegramGatewayProbeUrl
+    )
+    $Response = $null
+    try {
+        [void]$Request.Headers.TryAddWithoutValidation(
+            'X-Telegram-Bot-Api-Secret-Token',
+            $Secret
+        )
+        $Request.Content = [System.Net.Http.StringContent]::new(
+            '{}',
+            [Text.Encoding]::UTF8,
+            'application/json'
+        )
+        $Response = $Client.SendAsync($Request).GetAwaiter().GetResult()
+        if ([int]$Response.StatusCode -ne 200) {
+            throw 'Cloudflare Telegram gateway probe failed.'
+        }
+        $Payload = $Response.Content.ReadAsStringAsync().GetAwaiter().GetResult() |
+            ConvertFrom-Json
+        if ($Payload.ok -ne $true) {
+            throw 'Cloudflare Telegram gateway probe failed.'
+        }
+    }
+    catch {
+        throw 'Cloudflare Telegram gateway probe failed.'
+    }
+    finally {
+        if ($null -ne $Response) {
+            $Response.Dispose()
+        }
+        $Request.Dispose()
+        $Client.Dispose()
+        $Handler.Dispose()
     }
 }
 
@@ -196,19 +244,24 @@ try {
 
     $WebhookSecret = Require-EnvironmentValue 'WEBHOOK_SECRET'
     $YandexFunctionUrl = Require-EnvironmentValue 'YANDEX_FUNCTION_URL'
+    $BotToken = Require-EnvironmentValue 'BOT_TOKEN'
     if ($WebhookSecret -notmatch '^[A-Za-z0-9_-]{16,256}$') {
         throw 'WEBHOOK_SECRET is invalid.'
     }
     if ($YandexFunctionUrl -notmatch '^https://functions\.yandexcloud\.net/[a-z0-9]+\?tag=stable$') {
         throw 'YANDEX_FUNCTION_URL is invalid.'
     }
+    if ($BotToken -notmatch '^\d{8,12}:[A-Za-z0-9_-]{30,}$') {
+        throw 'BOT_TOKEN is invalid.'
+    }
     if ($RestoreSecretsOnly) {
         try {
-            Set-WorkerSecrets $WebhookSecret $YandexFunctionUrl
+            Set-WorkerSecrets $WebhookSecret $YandexFunctionUrl $BotToken
         }
         finally {
             $WebhookSecret = $null
             $YandexFunctionUrl = $null
+            $BotToken = $null
         }
         return
     }
@@ -227,7 +280,7 @@ try {
             $PreviousWorkerVersionId = Get-CurrentWorkerVersionId
         }
 
-        Set-WorkerSecrets $WebhookSecret $YandexFunctionUrl
+        Set-WorkerSecrets $WebhookSecret $YandexFunctionUrl $BotToken
         Invoke-WranglerQuiet @('deploy') 'Cloudflare Worker deployment failed.'
 
         $WrongSecretBytes = [byte[]]::new(24)
@@ -244,6 +297,7 @@ try {
             Replace('/', '-')
         Invoke-WorkerProbe $WrongSecret 403
         Invoke-WorkerProbe $WebhookSecret 200
+        Invoke-TelegramGatewayProbe $WebhookSecret
 
         [pscustomobject]@{
             WorkerUrl = $WorkerUrl
@@ -275,6 +329,7 @@ try {
     finally {
         $WebhookSecret = $null
         $YandexFunctionUrl = $null
+        $BotToken = $null
     }
 }
 finally {

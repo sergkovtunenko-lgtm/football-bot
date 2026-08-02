@@ -10,6 +10,7 @@ $DatabaseName = 'friday-football-bot-db'
 $ServiceAccountName = 'friday-football-bot-runtime'
 $TriggerName = 'friday-football-bot-every-minute'
 $CloudflareWebhookUrl = 'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram'
+$CloudflareTelegramApiUrl = 'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram-api'
 $CronExpression = '* * * * ? *'
 $TriggerPayload = 'tick'
 $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -312,7 +313,7 @@ try {
         }
     }
 
-    $Environment = "BOT_TOKEN=$BotToken,WEBHOOK_SECRET=$WebhookSecret,ADMIN_IDS=$RuntimeAdminIds,YDB_CONNECTION_STRING=$YdbConnectionString,YDB_METADATA_CREDENTIALS=1"
+    $Environment = "BOT_TOKEN=$BotToken,WEBHOOK_SECRET=$WebhookSecret,ADMIN_IDS=$RuntimeAdminIds,YDB_CONNECTION_STRING=$YdbConnectionString,YDB_METADATA_CREDENTIALS=1,TELEGRAM_API_BASE_URL=$CloudflareTelegramApiUrl"
     $PreviousErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
@@ -363,25 +364,6 @@ try {
     Invoke-WebhookProbe $CandidateUrl $WrongSecret 403
     Invoke-WebhookProbe $CandidateUrl $WebhookSecret 200
 
-    if (-not [string]::IsNullOrWhiteSpace($PreviousStableVersionId)) {
-        Write-Output "Previous stable version ID: $PreviousStableVersionId"
-        Write-Output "Rollback: yc serverless function version set-tag --id $PreviousStableVersionId --tag stable"
-    }
-    else {
-        Write-Output 'Previous stable version: none (first deployment); rollback tag is unavailable.'
-    }
-    Invoke-YcQuiet @('serverless', 'function', 'version', 'set-tag', '--id', $NewVersionId, '--tag', 'stable') 'Stable tag update'
-    $StableMoved = $true
-    Invoke-YcQuiet @('serverless', 'function', 'add-access-binding', $FunctionName, '--role', 'functions.functionInvoker', '--service-account-id', $ServiceAccountId) 'Private timer invocation binding'
-
-    $Trigger = Get-YcJsonOrNull @('serverless', 'trigger', 'get', $TriggerName, '--format', 'json') 'Timer trigger lookup'
-    if ($null -eq $Trigger) {
-        Invoke-YcQuiet @('serverless', 'trigger', 'create', 'timer', '--name', $TriggerName, '--cron-expression', $CronExpression, '--payload', $TriggerPayload, '--invoke-function-name', $FunctionName, '--invoke-function-tag', 'stable', '--invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger creation'
-    }
-    else {
-        Invoke-YcQuiet @('serverless', 'trigger', 'update', 'timer', '--id', ([string]$Trigger.id), '--new-cron-expression', $CronExpression, '--new-payload', $TriggerPayload, '--new-invoke-function-name', $FunctionName, '--new-invoke-function-tag', 'stable', '--new-invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger convergence'
-    }
-
     $PreviousYandexFunctionUrl = [Environment]::GetEnvironmentVariable('YANDEX_FUNCTION_URL', 'Process')
     try {
         $env:YANDEX_FUNCTION_URL = "https://functions.yandexcloud.net/$FunctionId`?tag=stable"
@@ -408,6 +390,25 @@ try {
         else {
             $env:YANDEX_FUNCTION_URL = $PreviousYandexFunctionUrl
         }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($PreviousStableVersionId)) {
+        Write-Output "Previous stable version ID: $PreviousStableVersionId"
+        Write-Output "Rollback: yc serverless function version set-tag --id $PreviousStableVersionId --tag stable"
+    }
+    else {
+        Write-Output 'Previous stable version: none (first deployment); rollback tag is unavailable.'
+    }
+    Invoke-YcQuiet @('serverless', 'function', 'version', 'set-tag', '--id', $NewVersionId, '--tag', 'stable') 'Stable tag update'
+    $StableMoved = $true
+    Invoke-YcQuiet @('serverless', 'function', 'add-access-binding', $FunctionName, '--role', 'functions.functionInvoker', '--service-account-id', $ServiceAccountId) 'Private timer invocation binding'
+
+    $Trigger = Get-YcJsonOrNull @('serverless', 'trigger', 'get', $TriggerName, '--format', 'json') 'Timer trigger lookup'
+    if ($null -eq $Trigger) {
+        Invoke-YcQuiet @('serverless', 'trigger', 'create', 'timer', '--name', $TriggerName, '--cron-expression', $CronExpression, '--payload', $TriggerPayload, '--invoke-function-name', $FunctionName, '--invoke-function-tag', 'stable', '--invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger creation'
+    }
+    else {
+        Invoke-YcQuiet @('serverless', 'trigger', 'update', 'timer', '--id', ([string]$Trigger.id), '--new-cron-expression', $CronExpression, '--new-payload', $TriggerPayload, '--new-invoke-function-name', $FunctionName, '--new-invoke-function-tag', 'stable', '--new-invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger convergence'
     }
 
     Write-Output "Stable URL: $env:FUNCTION_URL"

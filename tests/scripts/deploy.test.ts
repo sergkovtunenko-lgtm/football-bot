@@ -142,6 +142,9 @@ describe('deploy safety contract', () => {
       "Require-EnvironmentValue 'YANDEX_FUNCTION_URL'",
     );
     expect(cloudflareDeploySource).toContain(
+      "Require-EnvironmentValue 'BOT_TOKEN'",
+    );
+    expect(cloudflareDeploySource).toContain(
       '& $Wrangler queues info $Name',
     );
     expect(cloudflareDeploySource).toContain(
@@ -159,8 +162,24 @@ describe('deploy safety contract', () => {
     expect(cloudflareDeploySource).toContain('[string] $RollbackVersionId');
     expect(cloudflareDeploySource).toContain('[switch] $RestoreSecretsOnly');
     expect(cloudflareDeploySource).toContain('Invoke-WorkerProbe');
-    expect(cloudflareDeploySource).not.toContain('BOT_TOKEN');
+    expect(cloudflareDeploySource).toContain('BOT_TOKEN = $BotToken');
+    expect(cloudflareDeploySource).toContain('Invoke-TelegramGatewayProbe');
+    expect(cloudflareDeploySource).toContain('/telegram-api/getMe');
+    expect(cloudflareDeploySource).not.toContain('/telegram-api/sendMessage');
     expect(cloudflareDeploySource).not.toContain('Get-Command wrangler.cmd');
+  });
+
+  it('deploys the Telegram gateway before moving the Yandex stable tag', () => {
+    expect(deploySource).toContain(
+      "$CloudflareTelegramApiUrl = 'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram-api'",
+    );
+    expect(deploySource).toContain('TELEGRAM_API_BASE_URL=$CloudflareTelegramApiUrl');
+    const cloudflareDeploy = deploySource.indexOf(
+      "$CloudflareDeployment = & (Join-Path $PSScriptRoot 'deploy-cloudflare.ps1')",
+    );
+    const stableMove = deploySource.indexOf("'--tag', 'stable') 'Stable tag update'");
+    expect(cloudflareDeploy).toBeGreaterThan(-1);
+    expect(cloudflareDeploy).toBeLessThan(stableMove);
   });
 
   it('pins the Cloudflare account, toolchain, and CI dry-run', () => {
