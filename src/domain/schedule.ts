@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon';
 import type { SessionStatus } from './model';
 
-export type ScheduleActionKind = 'open' | 'reminder' | 'close';
+export type ScheduleActionKind = 'open' | 'close';
 
 export interface ScheduleAction {
   key: string;
@@ -42,8 +42,8 @@ export function nextScheduleAction(now: Date, status: SessionStatus): NextSchedu
   const local = DateTime.fromJSDate(now, { zone: ZONE });
 
   if (status === 'registration_open') {
-    const nextWhileOpen = nextActionWhileOpen(local);
-    if (nextWhileOpen) return nextWhileOpen;
+    const close = nextFridayClose(local);
+    if (close > local) return { kind: 'close', atIso: toUtcIso(close) };
   }
 
   return { kind: 'open', atIso: toUtcIso(nextTuesdayAtTen(local)) };
@@ -52,7 +52,6 @@ export function nextScheduleAction(now: Date, status: SessionStatus): NextSchedu
 function actionDueNow(local: DateTime, sessionId: string, status?: SessionStatus): ScheduleAction | undefined {
   if (status === 'registration_open') {
     if (isFridayCloseDue(local)) return action(sessionId, 'close');
-    if (isReminderDue(local)) return action(sessionId, 'reminder', reminderDay(local));
     return undefined;
   }
 
@@ -63,9 +62,8 @@ function actionDueNow(local: DateTime, sessionId: string, status?: SessionStatus
   return undefined;
 }
 
-function action(sessionId: string, kind: ScheduleActionKind, day?: string): ScheduleAction {
-  const suffix = kind === 'reminder' ? `:${day!}` : '';
-  return { key: `${sessionId}:${kind}${suffix}`, sessionId, kind };
+function action(sessionId: string, kind: ScheduleActionKind): ScheduleAction {
+  return { key: `${sessionId}:${kind}`, sessionId, kind };
 }
 
 function isRegistrationWindow(local: DateTime): boolean {
@@ -74,48 +72,21 @@ function isRegistrationWindow(local: DateTime): boolean {
     && !(local.weekday === FRIDAY && atOrAfter(local, 20, 55));
 }
 
-function isReminderDue(local: DateTime): boolean {
-  return local.weekday >= TUESDAY + 1
-    && local.weekday <= FRIDAY
-    && atOrAfter(local, 10, 0)
-    && !atOrAfter(local, 12, 1);
-}
-
 function isFridayCloseDue(local: DateTime): boolean {
   return local.weekday === FRIDAY && atOrAfter(local, 20, 55);
-}
-
-function reminderDay(local: DateTime): string {
-  return ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][local.weekday - 1]!;
 }
 
 function atOrAfter(local: DateTime, hour: number, minute: number): boolean {
   return local.hour > hour || (local.hour === hour && local.minute >= minute);
 }
 
-function nextActionWhileOpen(local: DateTime): NextScheduleAction | undefined {
-  if (local.weekday >= TUESDAY + 1 && local.weekday <= FRIDAY) {
-    const reminderToday = at(local, 10, 0);
-    if (reminderToday > local) return { kind: 'reminder', atIso: toUtcIso(reminderToday) };
-
-    if (local.weekday < FRIDAY) {
-      return { kind: 'reminder', atIso: toUtcIso(at(local.plus({ days: 1 }), 10, 0)) };
-    }
-
-    const closeToday = at(local, 20, 55);
-    if (closeToday > local) return { kind: 'close', atIso: toUtcIso(closeToday) };
-  }
-
-  if (local.weekday === FRIDAY) return undefined;
-  return { kind: 'reminder', atIso: toUtcIso(nextWednesdayAtTen(local)) };
+function nextFridayClose(local: DateTime): DateTime {
+  const daysUntilFriday = (FRIDAY - local.weekday + 7) % 7;
+  return at(local.plus({ days: daysUntilFriday }), 20, 55);
 }
 
 function nextTuesdayAtTen(local: DateTime): DateTime {
   return nextWeekdayAtTen(local, TUESDAY);
-}
-
-function nextWednesdayAtTen(local: DateTime): DateTime {
-  return nextWeekdayAtTen(local, TUESDAY + 1);
 }
 
 function nextWeekdayAtTen(local: DateTime, weekday: number): DateTime {

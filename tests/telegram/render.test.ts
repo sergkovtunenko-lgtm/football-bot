@@ -7,7 +7,6 @@ import {
   renderLeaderboard,
   renderPromotion,
   renderRegistrationCard,
-  renderReminder,
   renderScorePanel,
   renderStatus,
   renderTeams,
@@ -37,7 +36,7 @@ describe('Telegram rendering', () => {
     expect(text).toContain('⏳ РЕЗЕРВ · 1');
   });
 
-  it('explains signup, reserve promotion, random teams, and personal wins in the registration card and reminder', () => {
+  it('explains signup, reserve promotion, random teams, and personal wins in the registration card', () => {
     const view = {
       sessionId: '2026-07-24',
       active: [],
@@ -45,12 +44,11 @@ describe('Telegram rendering', () => {
       maxActive: 20,
     } as const;
 
-    for (const text of [renderRegistrationCard(view), renderReminder(view)]) {
-      expect(text).toContain('👥 Записывайтесь кнопками ниже');
-      expect(text).toContain('🚦 Первые 20 человек играют');
-      expect(text).toContain('🎲 В пятницу в 20:55');
-      expect(text).toContain('🏆 победа идёт в личную статистику');
-    }
+    const text = renderRegistrationCard(view);
+    expect(text).toContain('👥 Записывайтесь кнопками ниже');
+    expect(text).toContain('🚦 Первые 20 человек играют');
+    expect(text).toContain('🎲 В пятницу в 20:55');
+    expect(text).toContain('🏆 победа идёт в личную статистику');
   });
 
   it('uses versioned compact callback data', () => {
@@ -94,7 +92,7 @@ describe('Telegram rendering', () => {
 
   it('renders the remaining approved branded views with escaped names', () => {
     const registration = { sessionId: '2026-07-24', active: [{ displayName: 'Анна & <Иван>' }], waitlist: [], maxActive: 20 } as const;
-    expect(renderReminder(registration)).toContain('Анна &amp; &lt;Иван&gt;');
+    expect(renderRegistrationCard(registration)).toContain('Анна &amp; &lt;Иван&gt;');
     expect(renderPromotion('Оля "Капитан"')).toContain('Оля &quot;Капитан&quot;');
     expect(renderScorePanel({ sessionId: '2026-07-24', teams: [{ teamNumber: 1, wins: 2 }], finished: false })).toContain('2');
     expect(renderDailyResults({
@@ -102,7 +100,7 @@ describe('Telegram rendering', () => {
     })).toContain('О&#39;Коннор');
     expect(renderLeaderboard([{ rank: 1, telegramUserId: '1', displayName: '<Лидер>', wins: 5 }])).toContain('&lt;Лидер&gt;');
     expect(renderStatus({
-      sessionId: '2026-07-24', sessionStatus: 'registration_open', nextActionKind: 'reminder',
+      sessionId: '2026-07-24', sessionStatus: 'registration_open', nextActionKind: 'close',
       nextActionAtIso: '2026-07-23T18:00:00.000Z', activeCount: 0, waitlistCount: 0, teamCount: 0,
       pendingEffectCount: 0, lastSafeError: 'Ошибка & <безопасная>',
     })).toContain('Ошибка &amp; &lt;безопасная&gt;');

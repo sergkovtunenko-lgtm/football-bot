@@ -26,7 +26,7 @@ export interface DailyResultsView {
 export interface StatusView {
   sessionId: string;
   sessionStatus: SessionStatus;
-  nextActionKind: 'open' | 'reminder' | 'close';
+  nextActionKind: 'open' | 'close';
   nextActionAtIso: string;
   activeCount: number;
   waitlistCount: number;

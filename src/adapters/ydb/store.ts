@@ -616,11 +616,6 @@ function parseEffect(json: string): TelegramEffect {
         return { kind: value.kind, sessionId: value.sessionId, ownerUserId: value.ownerUserId };
       }
       break;
-    case 'reminder':
-      if (typeof value.sessionId === 'string' && typeof value.actionKey === 'string') {
-        return { kind: value.kind, sessionId: value.sessionId, actionKey: value.actionKey };
-      }
-      break;
     case 'admin_error':
       if (typeof value.correlationId === 'string' && typeof value.summary === 'string') {
         return { kind: value.kind, correlationId: value.correlationId, summary: value.summary };

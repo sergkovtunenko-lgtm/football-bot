@@ -3,7 +3,6 @@ import type { Participant, PlayerProfile, Session, Team, TeamMember, WinAward, W
 export type TelegramEffect =
   | { kind: 'registration_card'; sessionId: string }
   | { kind: 'promotion_notice'; sessionId: string; ownerUserId: string }
-  | { kind: 'reminder'; sessionId: string; actionKey: string }
   | { kind: 'teams'; sessionId: string }
   | { kind: 'score_panel'; sessionId: string }
   | { kind: 'final_results'; sessionId: string }

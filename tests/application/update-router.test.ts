@@ -19,7 +19,6 @@ function fixture() {
     setup: vi.fn().mockResolvedValue({ duplicate: false }),
     openNow: vi.fn().mockResolvedValue({ duplicate: false }),
     setParty: vi.fn().mockResolvedValue({ duplicate: false }),
-    remindNow: vi.fn().mockResolvedValue({ duplicate: false }),
     closeNow: vi.fn().mockResolvedValue({ duplicate: false }),
     recordWin: vi.fn().mockResolvedValue({ duplicate: false }),
     undoLastWin: vi.fn().mockResolvedValue({ duplicate: false }),
@@ -29,8 +28,8 @@ function fixture() {
       sessionId: '2026-07-24', active: [{ displayName: 'Игрок' }], waitlist: [], maxActive: 20,
     }),
     status: vi.fn().mockResolvedValue({
-      sessionId: '2026-07-24', sessionStatus: 'registration_open', nextActionKind: 'reminder',
-      nextActionAtIso: '2026-07-22T07:00:00.000Z', activeCount: 1, waitlistCount: 0,
+      sessionId: '2026-07-24', sessionStatus: 'registration_open', nextActionKind: 'close',
+      nextActionAtIso: '2026-07-24T17:55:00.000Z', activeCount: 1, waitlistCount: 0,
       teamCount: 0, pendingEffectCount: 0,
     }),
   };
@@ -251,7 +250,7 @@ describe('UpdateRouter callbacks', () => {
 
 describe('UpdateRouter recovery commands and validation', () => {
   it.each([
-    ['/setup', 'setup'], ['/open', 'openNow'], ['/remind', 'remindNow'],
+    ['/setup', 'setup'], ['/open', 'openNow'],
     ['/close', 'closeNow'], ['/undo', 'undoLastWin'],
   ] as const)('routes admin command %s', async (command, method) => {
     const { router, service } = fixture();
@@ -260,6 +259,16 @@ describe('UpdateRouter recovery commands and validation', () => {
     await router.handle(update);
     if (method === 'setup') expect(service.setup).toHaveBeenCalledWith('77', '900', '-1001');
     else expect(service[method]).toHaveBeenCalledWith('77', '900');
+  });
+
+  it('ignores the removed /remind command without publishing', async () => {
+    const { router, service, telegram } = fixture();
+    const update = message('/remind') as any;
+    update.message.from.id = 900;
+    await router.handle(update);
+    expect(service.openNow).not.toHaveBeenCalled();
+    expect(service.closeNow).not.toHaveBeenCalled();
+    expect(telegram.sendMessage).not.toHaveBeenCalled();
   });
 
   it('routes /status through a fresh status snapshot', async () => {
@@ -280,7 +289,7 @@ describe('UpdateRouter recovery commands and validation', () => {
     expect(telegram.editMessage).toHaveBeenCalledWith('-1001', '5', expect.stringContaining('Завершить'), expect.any(Object));
   });
 
-  it.each(['/setup', '/status', '/open', '/remind', '/close', '/undo', '/finish'])('requires admin for %s', async (command) => {
+  it.each(['/setup', '/status', '/open', '/close', '/undo', '/finish'])('requires admin for %s', async (command) => {
     const { router, service, telegram } = fixture();
     await router.handle(message(command));
     expect(service.setup).not.toHaveBeenCalled();
@@ -288,14 +297,13 @@ describe('UpdateRouter recovery commands and validation', () => {
     expect(telegram.sendMessage).toHaveBeenCalledWith('-1001', 'Только администратор');
   });
 
-  it.each(['/status', '/open', '/remind', '/close', '/undo', '/finish'])('ignores %s outside the configured group before admin checks', async (command) => {
+  it.each(['/status', '/open', '/close', '/undo', '/finish'])('ignores %s outside the configured group before admin checks', async (command) => {
     const { router, service, telegram } = fixture();
     const update = message(command) as any;
     update.message.chat.id = -2002;
     await router.handle(update);
     expect(service.status).not.toHaveBeenCalled();
     expect(service.openNow).not.toHaveBeenCalled();
-    expect(service.remindNow).not.toHaveBeenCalled();
     expect(service.closeNow).not.toHaveBeenCalled();
     expect(service.undoLastWin).not.toHaveBeenCalled();
     expect(telegram.sendMessage).not.toHaveBeenCalled();

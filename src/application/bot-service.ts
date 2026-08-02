@@ -45,23 +45,6 @@ export class BotService {
     });
   }
 
-  remindNow(updateId: string, actorUserId: string): Promise<UpdateExecution<{ sessionId: string }>> {
-    const now = this.clock.now();
-    const nowIso = now.toISOString();
-    const sessionId = sessionIdForCurrentCycle(now);
-    return this.store.transactUpdate(updateId, nowIso, async (tx) => {
-      this.requireAdmin(actorUserId);
-      const session = await this.requireSession(tx, sessionId);
-      if (session.status !== 'registration_open') throw new InvalidStateError('registration is not open');
-      await tx.enqueue(this.newId(), {
-        kind: 'reminder',
-        sessionId,
-        actionKey: `manual:${updateId}`,
-      }, nowIso);
-      return { sessionId };
-    });
-  }
-
   setParty(
     updateId: string,
     player: PlayerProfile,

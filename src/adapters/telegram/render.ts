@@ -86,10 +86,6 @@ export function renderTeams(view: TeamsView): string {
   ])].join('\n').trimEnd();
 }
 
-export function renderReminder(view: RegistrationView): string {
-  return `<b>⏰ Напоминание о футболе</b>\n${renderRegistrationCard(view)}`;
-}
-
 export function renderPromotion(displayName: string): string {
   return `🎉 ${escapeHtml(displayName)}, вы перешли из резерва в основной состав.`;
 }

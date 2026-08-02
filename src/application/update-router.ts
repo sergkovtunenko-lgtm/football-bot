@@ -13,7 +13,6 @@ import { logError } from '../logger';
 type RouterService = Pick<BotService,
   | 'setup'
   | 'openNow'
-  | 'remindNow'
   | 'setParty'
   | 'closeNow'
   | 'recordWin'
@@ -133,9 +132,6 @@ export class UpdateRouter {
       case '/open':
         await this.service.openNow(updateId, actor.id);
         break;
-      case '/remind':
-        await this.service.remindNow(updateId, actor.id);
-        break;
       case '/close':
         await this.service.closeNow(updateId, actor.id);
         break;
@@ -249,7 +245,7 @@ export class UpdateRouter {
   }
 }
 
-type RecoveryCommand = '/setup' | '/status' | '/open' | '/remind' | '/close' | '/undo' | '/finish';
+type RecoveryCommand = '/setup' | '/status' | '/open' | '/close' | '/undo' | '/finish';
 
 function finishConfirmationKeyboard() {
   return { inline_keyboard: [[
@@ -343,7 +339,7 @@ function winCallback(data: string | undefined): 1 | 2 | 3 | 4 | undefined {
 
 function commandName(text: string): RecoveryCommand | undefined {
   const first = text.split(/\s+/, 1)[0]?.split('@', 1)[0];
-  if (first === '/setup' || first === '/status' || first === '/open' || first === '/remind'
+  if (first === '/setup' || first === '/status' || first === '/open'
     || first === '/close' || first === '/undo' || first === '/finish') return first;
   return undefined;
 }

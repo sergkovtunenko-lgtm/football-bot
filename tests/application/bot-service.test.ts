@@ -37,7 +37,7 @@ describe('BotService', () => {
     expect(finished.value?.leaderboard).toEqual([]);
   });
 
-  it.each(['setup', 'remind', 'close', 'win', 'undo', 'finish'])('rejects non-admin %s', async (method) => {
+  it.each(['setup', 'close', 'win', 'undo', 'finish'])('rejects non-admin %s', async (method) => {
     const app = fixture();
     if (method !== 'setup') {
       await open(app);
@@ -47,11 +47,10 @@ describe('BotService', () => {
       }
     }
     const call = method === 'setup' ? app.service.setup('x', 'x', 'chat')
-      : method === 'remind' ? app.service.remindNow('x', 'x')
-        : method === 'close' ? app.service.closeNow('x', 'x')
-          : method === 'win' ? app.service.recordWin('x', 'x', 1)
-            : method === 'undo' ? app.service.undoLastWin('x', 'x')
-              : app.service.finish('x', 'x');
+      : method === 'close' ? app.service.closeNow('x', 'x')
+        : method === 'win' ? app.service.recordWin('x', 'x', 1)
+          : method === 'undo' ? app.service.undoLastWin('x', 'x')
+            : app.service.finish('x', 'x');
     await expect(call).rejects.toBeInstanceOf(ForbiddenError);
   });
 
@@ -74,14 +73,6 @@ describe('BotService', () => {
     const changed = await app.service.setParty('cancel', { telegramUserId: '1', displayName: 'P1' }, 0);
     expect(changed.value?.promotedOwnerIds).toEqual(['21']);
     expect(app.store.pendingEffects().some((entry) => entry.effect.kind === 'promotion_notice')).toBe(true);
-  });
-
-  it('enqueues one idempotent manual reminder for an admin while registration is open', async () => {
-    const app = fixture();
-    await open(app);
-    expect((await app.service.remindNow('manual-reminder', '900')).duplicate).toBe(false);
-    expect((await app.service.remindNow('manual-reminder', '900')).duplicate).toBe(true);
-    expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'reminder')).toHaveLength(1);
   });
 
   it('closes with insufficient players without starting play', async () => {

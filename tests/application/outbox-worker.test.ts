@@ -51,7 +51,7 @@ function pending(app: ReturnType<typeof fixture>): StoredEffect[] {
 describe('OutboxWorker delivery and semantic snapshots', () => {
   it('marks a sent effect sent', async () => {
     const app = fixture();
-    await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
+    await seed(app, { kind: 'teams', sessionId: SESSION_ID });
     expect(await app.worker.flush()).toEqual({ sent: 1, rescheduled: 0 });
     expect(pending(app)).toEqual([]);
   });
@@ -187,8 +187,8 @@ describe('OutboxWorker delivery and semantic snapshots', () => {
     await app.store.transact(async (tx) => {
       await tx.saveSettings({ groupChatId: '-1001' });
       await tx.saveSession(baseSession());
-      await tx.enqueue('a', { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'a' }, NOW);
-      await tx.enqueue('b', { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'b' }, NOW);
+      await tx.enqueue('a', { kind: 'teams', sessionId: SESSION_ID }, NOW);
+      await tx.enqueue('b', { kind: 'teams', sessionId: SESSION_ID }, NOW);
     });
     const claim = vi.spyOn(app.store, 'claimDueEffects');
     await app.worker.flush(2);
@@ -211,7 +211,7 @@ describe('OutboxWorker delivery and semantic snapshots', () => {
 describe('OutboxWorker retries', () => {
   it('reschedules Telegram 429 no earlier than retry_after', async () => {
     const app = fixture();
-    await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
+    await seed(app, { kind: 'teams', sessionId: SESSION_ID });
     vi.mocked(app.telegram.sendMessage).mockRejectedValue(new TelegramApiError(
       'sendMessage', 429, 'Too Many Requests: retry after 75',
     ));
@@ -223,7 +223,7 @@ describe('OutboxWorker retries', () => {
     [0, 30], [1, 120], [2, 600], [3, 3600], [4, 3600],
   ])('uses transient delay for previous attempt %i', async (attempts, delaySeconds) => {
     const app = fixture();
-    await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
+    await seed(app, { kind: 'teams', sessionId: SESSION_ID });
     if (attempts > 0) await app.store.rescheduleEffect('effect-1', attempts, NOW, 'old');
     vi.mocked(app.telegram.sendMessage).mockRejectedValue(new TelegramApiError('sendMessage', 503, 'unavailable'));
     await app.worker.flush();
@@ -233,7 +233,7 @@ describe('OutboxWorker retries', () => {
 
   it('marks a permanent Telegram 400 failed without retry', async () => {
     const app = fixture();
-    await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
+    await seed(app, { kind: 'teams', sessionId: SESSION_ID });
     vi.mocked(app.telegram.sendMessage).mockRejectedValue(new TelegramApiError('sendMessage', 400, 'bad request'));
     expect(await app.worker.flush()).toEqual({ sent: 0, rescheduled: 0 });
     expect(pending(app)).toEqual([]);
@@ -241,7 +241,7 @@ describe('OutboxWorker retries', () => {
 
   it('classifies permanent failures through the Telegram port error contract', async () => {
     const app = fixture();
-    await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
+    await seed(app, { kind: 'teams', sessionId: SESSION_ID });
     vi.mocked(app.telegram.sendMessage).mockRejectedValue(new TelegramError('sendMessage', 403, 'forbidden'));
     expect(await app.worker.flush()).toEqual({ sent: 0, rescheduled: 0 });
     expect(pending(app)).toEqual([]);
@@ -249,7 +249,7 @@ describe('OutboxWorker retries', () => {
 
   it('enqueues exactly one generic admin notice on the fourth transient failure and retries hourly', async () => {
     const app = fixture();
-    await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
+    await seed(app, { kind: 'teams', sessionId: SESSION_ID });
     await app.store.rescheduleEffect('effect-1', 3, NOW, 'old');
     vi.mocked(app.telegram.sendMessage).mockRejectedValue(new TelegramApiError('sendMessage', 500, 'private raw failure'));
     await app.worker.flush();
@@ -264,7 +264,7 @@ describe('OutboxWorker retries', () => {
 
   it('retries the fourth-failure atomic transition after an injected notice write failure', async () => {
     const app = fixture();
-    await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
+    await seed(app, { kind: 'teams', sessionId: SESSION_ID });
     await app.store.rescheduleEffect('effect-1', 3, NOW, 'old');
     app.store.failNextReschedule();
     vi.mocked(app.telegram.sendMessage).mockRejectedValue(new Error('network'));
@@ -280,7 +280,7 @@ describe('OutboxWorker retries', () => {
   it('truncates stored error text to 500 characters and removes bot tokens', async () => {
     const app = fixture();
     const token = '1234567890:' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef_12';
-    await seed(app, { kind: 'reminder', sessionId: SESSION_ID, actionKey: 'thu' });
+    await seed(app, { kind: 'teams', sessionId: SESSION_ID });
     vi.mocked(app.telegram.sendMessage).mockRejectedValue(new Error(
       `https://api.telegram.org/bot${token}/sendMessage ${'x'.repeat(700)}`,
     ));

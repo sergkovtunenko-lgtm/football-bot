@@ -8,7 +8,6 @@ import {
   renderLeaderboard,
   renderPromotion,
   renderRegistrationCard,
-  renderReminder,
   renderScorePanel,
   renderTeams,
   scoreKeyboard,
@@ -159,15 +158,6 @@ export class OutboxWorker {
             }],
           };
         }
-        case 'reminder':
-          const view = await registrationView(tx, effect.sessionId);
-          return {
-            chatId: groupChatId,
-            messages: [{
-              html: renderReminder(view),
-              keyboard: registrationKeyboard(view.sessionId),
-            }],
-          };
         case 'promotion_notice': {
           const participants = await tx.listParticipants(effect.sessionId);
           const displayName = participants.find((participant) => participant.ownerUserId === effect.ownerUserId)?.displayName

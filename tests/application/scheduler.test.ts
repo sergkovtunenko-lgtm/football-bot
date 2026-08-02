@@ -27,14 +27,14 @@ it('opens during a Tuesday catch-up window', async () => {
   expect(app.store.scheduledActionKeys()).toEqual(['2026-07-24:open']);
 });
 
-it('does not enqueue Wednesdays reminder on Thursday', async () => {
+it('does not enqueue reminder effects after opening', async () => {
   const app = fixture('2026-07-21T08:00:00.000Z');
   await app.scheduler.tick();
   app.advanceTo('2026-07-23T08:00:00.000Z');
   await app.scheduler.tick();
-  const reminders = app.store.pendingEffects().filter((entry) => entry.effect.kind === 'reminder');
-  expect(reminders).toHaveLength(1);
-  expect(reminders[0]?.effect).toMatchObject({ actionKey: '2026-07-24:reminder:thu' });
+  expect(app.store.scheduledActionKeys()).toEqual(['2026-07-24:open']);
+  expect(app.store.pendingEffects()).toHaveLength(1);
+  expect(app.store.pendingEffects()[0]?.effect.kind).toBe('registration_card');
 });
 
 it('catches up Friday close after 20:55 Moscow', async () => {

@@ -227,7 +227,7 @@ describeYdb(suiteName, () => {
 
   it('atomically reschedules a fourth failure and inserts its admin notice once', async () => {
     await store.transact((tx) => tx.enqueue(
-      'effect-1', { kind: 'reminder', sessionId: 's', actionKey: 'thu' }, '2026-07-21T08:00:00.000Z',
+      'effect-1', { kind: 'teams', sessionId: 's' }, '2026-07-21T08:00:00.000Z',
     ));
     await store.claimDueEffects('2026-07-21T08:00:00.000Z', 1, 'lease-1');
     const notice = {

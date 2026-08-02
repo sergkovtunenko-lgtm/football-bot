@@ -33,14 +33,6 @@ export class Scheduler {
           };
           await tx.saveSession(opened);
           await tx.enqueue(this.newId(), { kind: 'registration_card', sessionId: action.sessionId }, nowIso);
-        } else if (action.kind === 'reminder') {
-          if (session?.status === 'registration_open') {
-            await tx.enqueue(this.newId(), {
-              kind: 'reminder',
-              sessionId: action.sessionId,
-              actionKey: action.key,
-            }, nowIso);
-          }
         } else {
           await closeSession(tx, action.sessionId, nowIso, this.random, this.newId);
         }
