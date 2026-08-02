@@ -12,7 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "migrate": "node dist/adapters/ydb/migrate.js"
+    "migrate": "node dist/adapters/ydb/migrate.js",
+    "reset:production": "node dist/adapters/ydb/reset.js"
   },
   "dependencies": {
     "@ydbjs/auth": "6.3.1",
