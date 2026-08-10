@@ -158,11 +158,11 @@ describe('UpdateRouter callbacks', () => {
     expect(telegram.answerCallback).toHaveBeenCalledTimes(1);
   });
 
-  it('accepts a current-session registration button from a reminder message', async () => {
+  it('accepts a current-session registration button from the active card', async () => {
     const { router, service, telegram } = fixture();
-    const reminder = callback('v2:r:2026-07-24:2') as any;
-    reminder.callback_query.message.message_id = 999;
-    await router.handle(reminder);
+    const registrationCard = callback('v2:r:2026-07-24:2') as any;
+    registrationCard.callback_query.message.message_id = 999;
+    await router.handle(registrationCard);
     expect(service.setParty).toHaveBeenCalledWith('77', {
       telegramUserId: '900', displayName: 'Admin',
     }, 2);
