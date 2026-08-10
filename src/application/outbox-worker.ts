@@ -13,7 +13,8 @@ import {
   scoreKeyboard,
 } from '../adapters/telegram/render';
 import { buildLeaderboard, dailyPlayerWins } from '../domain/scoring';
-import type { Session, WinEvent } from '../domain/model';
+import type { Session, TeamMember, WinEvent } from '../domain/model';
+import { playerLabel } from '../domain/player-label';
 import { logError } from '../logger';
 import type { DailyResultsView, RegistrationView, ScoreView, TeamsView } from './views';
 import { redactTelegramTokens } from '../security/redact';
@@ -265,19 +266,23 @@ async function finalViews(tx: FootballTransaction, sessionId: string) {
   const completedSessionIds = await tx.listCompletedSessionIds();
   const players = await tx.listPlayers();
   const wins = dailyPlayerWins(sessionId, events, awards);
-  const displayNames = new Map(players.map((player) => [player.telegramUserId, player.displayName]));
-  for (const award of awards) if (!displayNames.has(award.telegramUserId)) displayNames.set(award.telegramUserId, award.displayName);
+  const profiles = new Map(players.map((player) => [player.telegramUserId, player]));
+  const historicalNames = new Map(awards.map((award) => [award.telegramUserId, award.displayName]));
+  const members: TeamMember[] = [];
+  for (const completedSessionId of completedSessionIds) {
+    members.push(...await tx.listTeamMembers(completedSessionId));
+  }
   const daily: DailyResultsView = {
     sessionId,
     teams: teams.map((team) => ({ teamNumber: team.teamNumber, wins: activeWins(events, team.teamNumber, sessionId) })),
     rows: [...wins].map(([telegramUserId, count]) => ({
-      displayName: displayNames.get(telegramUserId) ?? telegramUserId,
+      displayName: playerLabel(profiles.get(telegramUserId) ?? {}, historicalNames.get(telegramUserId)),
       wins: count,
     })).sort((a, b) => b.wins - a.wins || a.displayName.localeCompare(b.displayName, 'ru')),
   };
   return {
     daily,
-    leaderboard: buildLeaderboard(events, awards, completedSessionIds, displayNames),
+    leaderboard: buildLeaderboard(events, awards, completedSessionIds, members, profiles),
   };
 }
 

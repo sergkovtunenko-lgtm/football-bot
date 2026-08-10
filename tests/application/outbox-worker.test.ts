@@ -148,7 +148,11 @@ describe('OutboxWorker delivery and semantic snapshots', () => {
         participantId: 'p', sessionId: SESSION_ID, ownerUserId: '7', telegramUserId: '7', displayName: 'Иван',
         kind: 'player', queuePosition: 1n, rosterStatus: 'active',
       }]);
-      await tx.replaceTeams(SESSION_ID, [{ sessionId: SESSION_ID, teamNumber: 1 }], []);
+      await tx.upsertPlayer({ telegramUserId: '7', displayName: ' ', username: 'only_username' }, NOW);
+      await tx.replaceTeams(SESSION_ID, [{ sessionId: SESSION_ID, teamNumber: 1 }], [{
+        participantId: 'p', sessionId: SESSION_ID, ownerUserId: '7', telegramUserId: '7', displayName: 'Иван',
+        kind: 'player', queuePosition: 1n, rosterStatus: 'active', teamNumber: 1, role: 'starter',
+      }]);
       await tx.appendWin({ sessionId: SESSION_ID, ordinal: 1n, teamNumber: 1, adminUserId: '900', createdAtIso: NOW }, [{
         sessionId: SESSION_ID, winOrdinal: 1n, telegramUserId: '7', displayName: 'Иван',
       }]);
@@ -161,6 +165,7 @@ describe('OutboxWorker delivery and semantic snapshots', () => {
     expect(html).toContain('Иван, вы перешли');
     expect(html).toContain('Итоги вечера');
     expect(html).toContain('Рейтинг');
+    expect(html).toContain('@only_username');
     expect(html).toContain('corr');
     expect(html).not.toContain('raw Telegram secret must not appear');
   });

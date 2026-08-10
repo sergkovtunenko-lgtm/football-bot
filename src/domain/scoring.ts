@@ -1,10 +1,12 @@
-import type { TeamMember, WinAward, WinEvent } from './model';
+import type { PlayerProfile, TeamMember, WinAward, WinEvent } from './model';
+import { playerLabel } from './player-label';
 
 export interface LeaderboardRow {
   rank: number;
   telegramUserId: string;
   displayName: string;
   wins: number;
+  evenings: number;
 }
 
 export function awardsForWin(
@@ -48,17 +50,40 @@ export function buildLeaderboard(
   events: readonly WinEvent[],
   awards: readonly WinAward[],
   completedSessionIds: ReadonlySet<string>,
-  currentDisplayNames: ReadonlyMap<string, string>,
+  teamMembers: readonly TeamMember[],
+  currentPlayers: ReadonlyMap<string, PlayerProfile>,
 ): LeaderboardRow[] {
   const active = new Set(events
     .filter((event) => completedSessionIds.has(event.sessionId) && !event.reversedAtIso)
     .map((event) => `${event.sessionId}:${event.ordinal}`));
-  const rows = new Map<string, { displayName: string; wins: number }>();
+  const rows = new Map<string, { displayName: string; wins: number; evenings: number }>();
+  const attended = new Set<string>();
+  const labelFor = (telegramUserId: string, historicalDisplayName: string): string => playerLabel(
+    currentPlayers.get(telegramUserId) ?? {},
+    historicalDisplayName,
+  );
+  for (const member of teamMembers) {
+    if (!completedSessionIds.has(member.sessionId)
+      || member.kind !== 'player'
+      || member.telegramUserId === undefined) continue;
+    const attendanceKey = `${member.sessionId}:${member.telegramUserId}`;
+    if (attended.has(attendanceKey)) continue;
+    attended.add(attendanceKey);
+    const current = rows.get(member.telegramUserId);
+    rows.set(member.telegramUserId, {
+      displayName: labelFor(member.telegramUserId, member.displayName),
+      wins: current?.wins ?? 0,
+      evenings: (current?.evenings ?? 0) + 1,
+    });
+  }
   for (const award of awards) {
     if (!active.has(`${award.sessionId}:${award.winOrdinal}`)) continue;
-    const displayName = currentDisplayNames.get(award.telegramUserId) ?? award.displayName;
-    const current = rows.get(award.telegramUserId) ?? { displayName, wins: 0 };
-    rows.set(award.telegramUserId, { displayName, wins: current.wins + 1 });
+    const current = rows.get(award.telegramUserId);
+    rows.set(award.telegramUserId, {
+      displayName: labelFor(award.telegramUserId, award.displayName),
+      wins: (current?.wins ?? 0) + 1,
+      evenings: current?.evenings ?? 0,
+    });
   }
   const sorted = [...rows].map(([telegramUserId, value]) => ({ telegramUserId, ...value }))
     .sort((a, b) => b.wins - a.wins

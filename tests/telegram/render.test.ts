@@ -98,7 +98,7 @@ describe('Telegram rendering', () => {
     expect(renderDailyResults({
       sessionId: '2026-07-24', teams: [{ teamNumber: 1, wins: 1 }], rows: [{ displayName: "О'Коннор", wins: 1 }],
     })).toContain('О&#39;Коннор');
-    expect(renderLeaderboard([{ rank: 1, telegramUserId: '1', displayName: '<Лидер>', wins: 5 }])).toContain('&lt;Лидер&gt;');
+    expect(renderLeaderboard([{ rank: 1, telegramUserId: '1', displayName: '<Лидер>', wins: 5, evenings: 1 }])).toContain('&lt;Лидер&gt;');
     expect(renderStatus({
       sessionId: '2026-07-24', sessionStatus: 'registration_open', nextActionKind: 'close',
       nextActionAtIso: '2026-07-23T18:00:00.000Z', activeCount: 0, waitlistCount: 0, teamCount: 0,

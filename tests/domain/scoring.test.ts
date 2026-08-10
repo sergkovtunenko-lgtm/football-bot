@@ -88,25 +88,42 @@ describe('dailyPlayerWins', () => {
 });
 
 describe('buildLeaderboard', () => {
-  it('counts only active awards from completed sessions and ranks 1, 1, 3', () => {
+  it('counts one completed evening per player, includes team reserves, and preserves zero-win players', () => {
     const events: WinEvent[] = [
       { sessionId: 'done', ordinal: 1n, teamNumber: 1, adminUserId: 'a', createdAtIso: 'x' },
-      { sessionId: 'done', ordinal: 2n, teamNumber: 1, adminUserId: 'a', createdAtIso: 'x' },
+      { sessionId: 'done', ordinal: 2n, teamNumber: 1, adminUserId: 'a', createdAtIso: 'x', reversedAtIso: 'y' },
       { sessionId: 'open', ordinal: 1n, teamNumber: 1, adminUserId: 'a', createdAtIso: 'x' },
     ];
     const awards: WinAward[] = [
       { sessionId: 'done', winOrdinal: 1n, telegramUserId: '1', displayName: 'Антон' },
-      { sessionId: 'done', winOrdinal: 1n, telegramUserId: '2', displayName: 'Борис' },
-      { sessionId: 'done', winOrdinal: 1n, telegramUserId: '3', displayName: 'Виктор' },
+      { sessionId: 'done', winOrdinal: 1n, telegramUserId: '4', displayName: 'Лев' },
       { sessionId: 'done', winOrdinal: 2n, telegramUserId: '1', displayName: 'Антон' },
-      { sessionId: 'done', winOrdinal: 2n, telegramUserId: '2', displayName: 'Борис' },
-      { sessionId: 'open', winOrdinal: 1n, telegramUserId: '1', displayName: 'Антон' },
+      { sessionId: 'open', winOrdinal: 1n, telegramUserId: '2', displayName: 'Борис' },
     ];
+    const teamMembers: TeamMember[] = [
+      { ...member('1'), sessionId: 'done' },
+      { ...member('1', 'reserve'), participantId: 'duplicate', sessionId: 'done', teamNumber: 2 },
+      { ...member('1'), participantId: 'next-evening', sessionId: 'done-2' },
+      { ...member('2', 'reserve'), sessionId: 'done' },
+      { ...member('3'), sessionId: 'done', teamNumber: 2 },
+      { ...member('5'), sessionId: 'open' },
+      {
+        participantId: 'guest', sessionId: 'done', ownerUserId: '9', telegramUserId: '9', displayName: 'Гость',
+        kind: 'guest', guestNumber: 1, queuePosition: 9n, rosterStatus: 'active',
+        teamNumber: 1, role: 'starter',
+      },
+    ];
+    const players = new Map([
+      ['1', { telegramUserId: '1', displayName: 'Антон Новый' }],
+      ['2', { telegramUserId: '2', displayName: 'Борис' }],
+      ['3', { telegramUserId: '3', displayName: 'Виктор' }],
+    ]);
 
-    expect(buildLeaderboard(events, awards, new Set(['done']), new Map([['1', 'Антон Новый']]))).toEqual([
-      { rank: 1, telegramUserId: '1', displayName: 'Антон Новый', wins: 2 },
-      { rank: 1, telegramUserId: '2', displayName: 'Борис', wins: 2 },
-      { rank: 3, telegramUserId: '3', displayName: 'Виктор', wins: 1 },
+    expect(buildLeaderboard(events, awards, new Set(['done', 'done-2']), teamMembers, players)).toEqual([
+      { rank: 1, telegramUserId: '1', displayName: 'Антон Новый', wins: 1, evenings: 2 },
+      { rank: 1, telegramUserId: '4', displayName: 'Лев', wins: 1, evenings: 0 },
+      { rank: 3, telegramUserId: '2', displayName: 'Борис', wins: 0, evenings: 1 },
+      { rank: 3, telegramUserId: '3', displayName: 'Виктор', wins: 0, evenings: 1 },
     ]);
   });
 
@@ -119,7 +136,13 @@ describe('buildLeaderboard', () => {
       { sessionId: 'done', winOrdinal: 1n, telegramUserId: '1', displayName: 'Одинаковый' },
     ];
 
-    expect(buildLeaderboard(events, awards, new Set(['done']), new Map()))
+    expect(buildLeaderboard(
+      events,
+      awards,
+      new Set(['done']),
+      [{ ...member('9'), sessionId: 'done' }, { ...member('1'), sessionId: 'done' }],
+      new Map(),
+    ))
       .toMatchObject([{ telegramUserId: '1' }, { telegramUserId: '9' }]);
   });
 });

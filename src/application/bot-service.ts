@@ -1,7 +1,7 @@
 import type { Clock } from '../ports/clock';
 import type { RandomSource } from '../ports/random';
 import type { FootballStore, FootballTransaction, UpdateExecution } from '../ports/store';
-import type { PlayerProfile, Session } from '../domain/model';
+import type { PlayerProfile, Session, TeamMember } from '../domain/model';
 import { changeParty, type RegistrationChange } from '../domain/registration';
 import { formTeams } from '../domain/teams';
 import { awardsForWin, buildLeaderboard, lastReversibleWin, type LeaderboardRow } from '../domain/scoring';
@@ -237,10 +237,15 @@ async function completedLeaderboard(tx: FootballTransaction): Promise<Leaderboar
   const awards = await tx.listWinAwards();
   const completedSessionIds = await tx.listCompletedSessionIds();
   const players = await tx.listPlayers();
+  const members: TeamMember[] = [];
+  for (const completedSessionId of completedSessionIds) {
+    members.push(...await tx.listTeamMembers(completedSessionId));
+  }
   return buildLeaderboard(
     events,
     awards,
     completedSessionIds,
-    new Map(players.map((player) => [player.telegramUserId, player.displayName])),
+    members,
+    new Map(players.map((player) => [player.telegramUserId, player])),
   );
 }

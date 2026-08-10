@@ -34,7 +34,8 @@ describe('BotService', () => {
     expect((await app.service.recordWin('win-1', '900', 1)).duplicate).toBe(true);
     await app.service.undoLastWin('undo', '900');
     const finished = await app.service.finish('finish', '900');
-    expect(finished.value?.leaderboard).toEqual([]);
+    expect(finished.value?.leaderboard).toHaveLength(10);
+    expect(finished.value?.leaderboard.every((row) => row.wins === 0 && row.evenings === 1)).toBe(true);
   });
 
   it.each(['setup', 'close', 'win', 'undo', 'finish'])('rejects non-admin %s', async (method) => {
@@ -140,12 +141,12 @@ describe('BotService', () => {
     const app = fixture();
     await open(app); await register(app, 10); await app.service.closeNow('close', '900');
     await app.service.finish('finish-1', '900');
-    expect((await app.service.finish('finish-2', '900')).value?.leaderboard).toEqual([]);
+    expect((await app.service.finish('finish-2', '900')).value?.leaderboard).toHaveLength(10);
     expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'final_results')).toHaveLength(1);
     await expect(app.service.recordWin('win', '900', 1)).rejects.toBeInstanceOf(InvalidStateError);
   });
 
-  it('includes only completed sessions in the final leaderboard', async () => {
+  it('includes winners and zero-win attendees only after their session is completed', async () => {
     const app = fixture();
     await open(app); await register(app, 10); await app.service.closeNow('close', '900');
     await app.service.recordWin('win', '900', 1);
@@ -153,7 +154,11 @@ describe('BotService', () => {
       events: await tx.listWinEvents(), awards: await tx.listWinAwards(), completed: await tx.listCompletedSessionIds(),
     }));
     expect(before.completed.size).toBe(0);
-    expect((await app.service.finish('finish', '900')).value?.leaderboard.length).toBeGreaterThan(0);
+    const leaderboard = (await app.service.finish('finish', '900')).value?.leaderboard ?? [];
+    expect(leaderboard).toHaveLength(10);
+    expect(leaderboard.every((row) => row.evenings === 1)).toBe(true);
+    expect(leaderboard.some((row) => row.wins === 1)).toBe(true);
+    expect(leaderboard.some((row) => row.wins === 0)).toBe(true);
   });
 
   it('reports phase, counts, next action, and operational data', async () => {
