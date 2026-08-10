@@ -8,6 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
+. (Join-Path $PSScriptRoot 'deploy-helpers.ps1')
 
 $QueueName = 'friday-football-bot-updates'
 $DeadLetterQueueName = 'friday-football-bot-updates-dlq'
@@ -297,7 +298,9 @@ try {
             Replace('/', '-')
         Invoke-WorkerProbe $WrongSecret 403
         Invoke-WorkerProbe $WebhookSecret 200
-        Invoke-TelegramGatewayProbe $WebhookSecret
+        Wait-CloudflareTelegramGateway `
+            -Secret $WebhookSecret `
+            -ProbeInvoker { param($Secret) Invoke-TelegramGatewayProbe $Secret }
 
         [pscustomobject]@{
             WorkerUrl = $WorkerUrl

@@ -56,6 +56,34 @@ function Get-YandexFunctionStableUrl {
     return "https://functions.yandexcloud.net/$FunctionId`?tag=stable"
 }
 
+function Wait-CloudflareTelegramGateway {
+    param(
+        [Parameter(Mandatory)][string] $Secret,
+        [Parameter(Mandatory)][scriptblock] $ProbeInvoker,
+        [scriptblock] $DelayInvoker,
+        [ValidateRange(1, 60)][int] $MaxAttempts = 6
+    )
+
+    if ($null -eq $DelayInvoker) {
+        $DelayInvoker = {
+            param($Seconds)
+            Start-Sleep -Seconds $Seconds
+        }
+    }
+    for ($Attempt = 1; $Attempt -le $MaxAttempts; $Attempt++) {
+        try {
+            [void](& $ProbeInvoker $Secret)
+            return
+        }
+        catch {
+            if ($Attempt -eq $MaxAttempts) {
+                throw 'Cloudflare Telegram gateway did not become ready.'
+            }
+        }
+        & $DelayInvoker 5
+    }
+}
+
 function Invoke-ProductionRollback {
     param(
         [Parameter(Mandatory)][bool] $StableMoved,

@@ -291,6 +291,68 @@ describe.skipIf(process.platform !== 'win32')('deploy PowerShell helpers', () =>
     expect(output).toBe('111;222;-333');
   }, powerShellTestTimeout);
 
+  it('waits for the Cloudflare Telegram gateway condition instead of failing on initial 404s', () => {
+    const command = `
+      . '${escapedHelperPath}'
+      $script:calls = 0
+      $script:delays = [Collections.Generic.List[int]]::new()
+      $probe = {
+        param($Secret)
+        $script:calls++
+        if ($Secret -ne 'safe-secret' -or $script:calls -lt 3) { throw 'not ready' }
+      }
+      Wait-CloudflareTelegramGateway -Secret 'safe-secret' -ProbeInvoker $probe -DelayInvoker {
+        param($Seconds)
+        [void]$script:delays.Add($Seconds)
+      } -MaxAttempts 3
+      [pscustomobject]@{ calls = $script:calls; delays = $script:delays } |
+        ConvertTo-Json -Compress
+    `;
+    const output = execFileSync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ], { encoding: 'utf8' }).trim();
+
+    expect(JSON.parse(output)).toEqual({ calls: 3, delays: [5, 5] });
+  }, powerShellTestTimeout);
+
+  it('stops Cloudflare gateway readiness polling after the bounded attempt count', () => {
+    const command = `
+      . '${escapedHelperPath}'
+      $script:calls = 0
+      $script:delays = 0
+      try {
+        Wait-CloudflareTelegramGateway -Secret 'safe-secret' -ProbeInvoker {
+          param($Secret)
+          $script:calls++
+          throw 'provider detail'
+        } -DelayInvoker {
+          param($Seconds)
+          $script:delays++
+        } -MaxAttempts 3
+        exit 0
+      }
+      catch {
+        [pscustomobject]@{
+          calls = $script:calls
+          delays = $script:delays
+          message = $_.Exception.Message
+        } | ConvertTo-Json -Compress
+        exit 7
+      }
+    `;
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ], { encoding: 'utf8' });
+
+    expect(result.status).toBe(7);
+    expect(JSON.parse(result.stdout.trim())).toEqual({
+      calls: 3,
+      delays: 2,
+      message: 'Cloudflare Telegram gateway did not become ready.',
+    });
+    expect(`${result.stdout}${result.stderr}`).not.toContain('provider detail');
+  }, powerShellTestTimeout);
+
   it('builds no rollback URL before the function ID has been resolved', () => {
     const command = `. '${escapedHelperPath}'; [Console]::Out.Write((Get-YandexFunctionStableUrl ''))`;
     const result = spawnSync('powershell.exe', [
