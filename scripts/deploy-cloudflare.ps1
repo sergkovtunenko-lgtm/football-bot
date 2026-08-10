@@ -128,15 +128,14 @@ function Set-WorkerSecrets {
     $PreviousErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $SecretsJson | & $Wrangler secret bulk *> $null
-        $ExitCode = $LASTEXITCODE
+        Invoke-CloudflareSecretUpdateWithRetry -UpdateInvoker {
+            $SecretsJson | & $Wrangler secret bulk *> $null
+            return $LASTEXITCODE
+        }
     }
     finally {
         $SecretsJson = $null
         $ErrorActionPreference = $PreviousErrorActionPreference
-    }
-    if ($ExitCode -ne 0) {
-        throw 'Cloudflare Worker secret update failed.'
     }
 }
 

@@ -353,6 +353,65 @@ describe.skipIf(process.platform !== 'win32')('deploy PowerShell helpers', () =>
     expect(`${result.stdout}${result.stderr}`).not.toContain('provider detail');
   }, powerShellTestTimeout);
 
+  it('retries a transient Cloudflare secret update failure', () => {
+    const command = `
+      . '${escapedHelperPath}'
+      $script:calls = 0
+      $script:delays = [Collections.Generic.List[int]]::new()
+      Invoke-CloudflareSecretUpdateWithRetry -UpdateInvoker {
+        $script:calls++
+        if ($script:calls -lt 3) { return 1 }
+        return 0
+      } -DelayInvoker {
+        param($Seconds)
+        [void]$script:delays.Add($Seconds)
+      } -MaxAttempts 3
+      [pscustomobject]@{ calls = $script:calls; delays = $script:delays } |
+        ConvertTo-Json -Compress
+    `;
+    const output = execFileSync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ], { encoding: 'utf8' }).trim();
+
+    expect(JSON.parse(output)).toEqual({ calls: 3, delays: [5, 5] });
+  }, powerShellTestTimeout);
+
+  it('bounds Cloudflare secret update retries and hides provider details', () => {
+    const command = `
+      . '${escapedHelperPath}'
+      $script:calls = 0
+      $script:delays = 0
+      try {
+        Invoke-CloudflareSecretUpdateWithRetry -UpdateInvoker {
+          $script:calls++
+          return 1
+        } -DelayInvoker {
+          param($Seconds)
+          $script:delays++
+        } -MaxAttempts 3
+        exit 0
+      }
+      catch {
+        [pscustomobject]@{
+          calls = $script:calls
+          delays = $script:delays
+          message = $_.Exception.Message
+        } | ConvertTo-Json -Compress
+        exit 7
+      }
+    `;
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ], { encoding: 'utf8' });
+
+    expect(result.status).toBe(7);
+    expect(JSON.parse(result.stdout.trim())).toEqual({
+      calls: 3,
+      delays: 2,
+      message: 'Cloudflare Worker secret update failed.',
+    });
+  }, powerShellTestTimeout);
+
   it('builds no rollback URL before the function ID has been resolved', () => {
     const command = `. '${escapedHelperPath}'; [Console]::Out.Write((Get-YandexFunctionStableUrl ''))`;
     const result = spawnSync('powershell.exe', [

@@ -84,6 +84,31 @@ function Wait-CloudflareTelegramGateway {
     }
 }
 
+function Invoke-CloudflareSecretUpdateWithRetry {
+    param(
+        [Parameter(Mandatory)][scriptblock] $UpdateInvoker,
+        [scriptblock] $DelayInvoker,
+        [ValidateRange(1, 10)][int] $MaxAttempts = 3
+    )
+
+    if ($null -eq $DelayInvoker) {
+        $DelayInvoker = {
+            param($Seconds)
+            Start-Sleep -Seconds $Seconds
+        }
+    }
+    for ($Attempt = 1; $Attempt -le $MaxAttempts; $Attempt++) {
+        $ExitCode = & $UpdateInvoker
+        if ($ExitCode -eq 0) {
+            return
+        }
+        if ($Attempt -eq $MaxAttempts) {
+            throw 'Cloudflare Worker secret update failed.'
+        }
+        & $DelayInvoker 5
+    }
+}
+
 function Invoke-ProductionRollback {
     param(
         [Parameter(Mandatory)][bool] $StableMoved,
