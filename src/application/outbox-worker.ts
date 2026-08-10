@@ -5,7 +5,7 @@ import {
   escapeHtml,
   registrationKeyboard,
   renderDailyResults,
-  renderLeaderboard,
+  renderLeaderboardPages,
   renderPromotion,
   renderRegistrationCard,
   renderScorePanel,
@@ -192,7 +192,7 @@ export class OutboxWorker {
           const { daily, leaderboard } = await finalViews(tx, effect.sessionId);
           return { chatId: groupChatId, messages: [
             { html: renderDailyResults(daily) },
-            { html: renderLeaderboard(leaderboard) },
+            ...renderLeaderboardPages(leaderboard).map((html) => ({ html })),
           ] };
         }
         case 'admin_error':

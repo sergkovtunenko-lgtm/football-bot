@@ -4,7 +4,7 @@ import {
   finishConfirmationKeyboard,
   registrationKeyboard,
   renderDailyResults,
-  renderLeaderboard,
+  renderLeaderboardPages,
   renderPromotion,
   renderRegistrationCard,
   renderScorePanel,
@@ -87,7 +87,9 @@ describe('Telegram rendering', () => {
     expect(daily).toContain('Нет сформированных команд');
     expect(daily).toContain('Победы игроков сегодня</b>\n—');
 
-    expect(renderLeaderboard([])).toContain('Пока нет завершённых игр.');
+    expect(renderLeaderboardPages([])).toEqual([
+      expect.stringContaining('Пока нет завершённых футбольных вечеров.'),
+    ]);
   });
 
   it('renders the remaining approved branded views with escaped names', () => {
@@ -98,7 +100,9 @@ describe('Telegram rendering', () => {
     expect(renderDailyResults({
       sessionId: '2026-07-24', teams: [{ teamNumber: 1, wins: 1 }], rows: [{ displayName: "О'Коннор", wins: 1 }],
     })).toContain('О&#39;Коннор');
-    expect(renderLeaderboard([{ rank: 1, telegramUserId: '1', displayName: '<Лидер>', wins: 5, evenings: 1 }])).toContain('&lt;Лидер&gt;');
+    expect(renderLeaderboardPages([
+      { rank: 1, telegramUserId: '1', displayName: '<Лидер>', wins: 5, evenings: 1 },
+    ]).join('\n')).toContain('&lt;Лидер&gt;');
     expect(renderStatus({
       sessionId: '2026-07-24', sessionStatus: 'registration_open', nextActionKind: 'close',
       nextActionAtIso: '2026-07-23T18:00:00.000Z', activeCount: 0, waitlistCount: 0, teamCount: 0,
@@ -115,6 +119,43 @@ describe('Telegram rendering', () => {
     for (const row of scoreKeyboard([1, 2, 3, 4]).inline_keyboard) {
       for (const button of row) expect(Buffer.byteLength(button.callback_data)).toBeLessThan(64);
     }
+  });
+
+  it('renders the approved two-line season rating with medals and Russian word forms', () => {
+    const [rating] = renderLeaderboardPages([
+      { rank: 1, telegramUserId: '1', displayName: '<Сергей>', wins: 12, evenings: 3 },
+      { rank: 1, telegramUserId: '2', displayName: 'Вячеслав', wins: 1, evenings: 1 },
+      { rank: 3, telegramUserId: '3', displayName: '@football_player', wins: 0, evenings: 5 },
+      { rank: 4, telegramUserId: '4', displayName: 'Игрок 4', wins: 2, evenings: 2 },
+      { rank: 5, telegramUserId: '5', displayName: 'Игрок 5', wins: 5, evenings: 11 },
+      { rank: 6, telegramUserId: '6', displayName: 'Игрок 6', wins: 21, evenings: 21 },
+    ]);
+
+    expect(rating).toContain('<b>🏆 РЕЙТИНГ СЕЗОНА</b>');
+    expect(rating).toContain('🥇 &lt;Сергей&gt;\n   🏆 12 побед · 📅 3 вечера');
+    expect(rating).toContain('🥇 Вячеслав\n   🏆 1 победа · 📅 1 вечер');
+    expect(rating).toContain('🥉 @football_player\n   🏆 0 побед · 📅 5 вечеров');
+    expect(rating).toContain('4. Игрок 4\n   🏆 2 победы · 📅 2 вечера');
+    expect(rating).toContain('5. Игрок 5\n   🏆 5 побед · 📅 11 вечеров');
+    expect(rating).toContain('6. Игрок 6\n   🏆 21 победа · 📅 21 вечер');
+  });
+
+  it('splits a long rating into complete Telegram-safe pages without losing players', () => {
+    const rows = Array.from({ length: 120 }, (_, index) => ({
+      rank: index + 1,
+      telegramUserId: String(index + 1),
+      displayName: `Игрок-${String(index + 1).padStart(3, '0')}-${'А'.repeat(72)}`,
+      wins: 120 - index,
+      evenings: 12,
+    }));
+
+    const pages = renderLeaderboardPages(rows);
+    const rendered = pages.join('\n');
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.every((page) => page.length <= 4096)).toBe(true);
+    expect(pages[0]).toMatch(/РЕЙТИНГ СЕЗОНА · 1\/\d+/);
+    expect(pages.at(-1)).toContain(`· ${pages.length}/${pages.length}`);
+    for (const row of rows) expect(rendered).toContain(row.displayName);
   });
 
   it('uses the versioned callback for finish confirmation', () => {

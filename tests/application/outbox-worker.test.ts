@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OutboxWorker } from '../../src/application/outbox-worker';
 import { TelegramApiError } from '../../src/adapters/telegram/client';
-import type { Session } from '../../src/domain/model';
+import type { Session, TeamMember } from '../../src/domain/model';
 import type { StoredEffect, TelegramEffect } from '../../src/ports/store';
 import { TelegramError, type TelegramPort } from '../../src/ports/telegram';
 import { InMemoryFootballStore } from '../support/in-memory-store';
@@ -46,6 +46,37 @@ function baseSession(overrides: Partial<Session> = {}): Session {
 
 function pending(app: ReturnType<typeof fixture>): StoredEffect[] {
   return app.store.pendingEffects();
+}
+
+async function seedLongFinalRating(app: ReturnType<typeof fixture>, effectId = 'final-pages'): Promise<TeamMember[]> {
+  const members: TeamMember[] = Array.from({ length: 120 }, (_, index) => {
+    const id = String(index + 1);
+    return {
+      participantId: id,
+      sessionId: SESSION_ID,
+      ownerUserId: id,
+      telegramUserId: id,
+      displayName: `Игрок-${id.padStart(3, '0')}-${'А'.repeat(72)}`,
+      kind: 'player',
+      queuePosition: BigInt(index + 1),
+      rosterStatus: 'active',
+      teamNumber: (index % 4 + 1) as 1 | 2 | 3 | 4,
+      role: 'starter',
+    };
+  });
+  await app.store.transact(async (tx) => {
+    await tx.saveSettings({ groupChatId: '-1001' });
+    await tx.saveSession(baseSession({ status: 'finished' }));
+    await tx.replaceTeams(SESSION_ID, [1, 2, 3, 4].map((teamNumber) => ({
+      sessionId: SESSION_ID,
+      teamNumber: teamNumber as 1 | 2 | 3 | 4,
+    })), members);
+    for (const member of members) {
+      await tx.upsertPlayer({ telegramUserId: member.telegramUserId!, displayName: member.displayName }, NOW);
+    }
+    await tx.enqueue(effectId, { kind: 'final_results', sessionId: SESSION_ID }, NOW);
+  });
+  return members;
 }
 
 describe('OutboxWorker delivery and semantic snapshots', () => {
@@ -164,7 +195,7 @@ describe('OutboxWorker delivery and semantic snapshots', () => {
     const html = vi.mocked(app.telegram.sendMessage).mock.calls.map((call) => call[1]).join('\n');
     expect(html).toContain('Иван, вы перешли');
     expect(html).toContain('Итоги вечера');
-    expect(html).toContain('Рейтинг');
+    expect(html).toContain('РЕЙТИНГ СЕЗОНА');
     expect(html).toContain('@only_username');
     expect(html).toContain('corr');
     expect(html).not.toContain('raw Telegram secret must not appear');
@@ -185,6 +216,37 @@ describe('OutboxWorker delivery and semantic snapshots', () => {
 
     expect(await app.worker.flush()).toEqual({ sent: 1, rescheduled: 0 });
     expect(pending(app)).toEqual([]);
+  });
+
+  it('delivers every page of a long final rating after the daily summary', async () => {
+    const app = fixture();
+    await seedLongFinalRating(app);
+
+    expect(await app.worker.flush()).toEqual({ sent: 1, rescheduled: 0 });
+    const messages = vi.mocked(app.telegram.sendMessage).mock.calls.map((call) => call[1]);
+    expect(messages[0]).toContain('Итоги вечера');
+    const ratingPages = messages.slice(1);
+    expect(ratingPages.length).toBeGreaterThan(1);
+    expect(ratingPages.every((page) => page.length <= 4096)).toBe(true);
+    expect(ratingPages.join('\n')).toContain('Игрок-001');
+    expect(ratingPages.join('\n')).toContain('Игрок-120');
+    expect(pending(app)).toEqual([]);
+  });
+
+  it('reschedules final results when a later rating page cannot be delivered', async () => {
+    const app = fixture();
+    await seedLongFinalRating(app, 'final-retry');
+    vi.mocked(app.telegram.sendMessage)
+      .mockResolvedValueOnce({ messageId: 'daily' })
+      .mockResolvedValueOnce({ messageId: 'rating-1' })
+      .mockRejectedValueOnce(new TelegramApiError('sendMessage', 503, 'unavailable'));
+
+    expect(await app.worker.flush()).toEqual({ sent: 0, rescheduled: 1 });
+    expect(vi.mocked(app.telegram.sendMessage)).toHaveBeenCalledTimes(3);
+    expect(pending(app)).toEqual([expect.objectContaining({
+      effectId: 'final-retry',
+      attempts: 1,
+    })]);
   });
 
   it('claims and processes at most one effect at a time in visible order', async () => {

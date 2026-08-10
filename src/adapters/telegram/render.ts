@@ -9,6 +9,9 @@ import type { LeaderboardRow } from '../../domain/scoring';
 import type { InlineKeyboard } from '../../ports/telegram';
 
 const TEAM_COLORS = ['🟥', '🟦', '🟩', '🟨'] as const;
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+const LEADERBOARD_BODY_LIMIT = 3900;
+const LEADERBOARD_NAME_LIMIT = 128;
 
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -37,6 +40,31 @@ function progressBar(activeCount: number, maxActive: number): string {
 
 function teamLabel(teamNumber: 1 | 2 | 3 | 4): string {
   return `${TEAM_COLORS[teamNumber - 1]} Команда ${teamNumber}`;
+}
+
+function russianCount(value: number, one: string, few: string, many: string): string {
+  const mod100 = Math.abs(value) % 100;
+  const mod10 = mod100 % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+function rankMarker(rank: number): string {
+  if (rank === 1) return '🥇';
+  if (rank === 2) return '🥈';
+  if (rank === 3) return '🥉';
+  return `${rank}.`;
+}
+
+function leaderboardEntry(row: LeaderboardRow): string {
+  const name = escapeHtml(row.displayName.slice(0, LEADERBOARD_NAME_LIMIT));
+  return [
+    `${rankMarker(row.rank)} ${name}`,
+    `   🏆 ${row.wins} ${russianCount(row.wins, 'победа', 'победы', 'побед')} · `
+      + `📅 ${row.evenings} ${russianCount(row.evenings, 'вечер', 'вечера', 'вечеров')}`,
+  ].join('\n');
 }
 
 export function renderRegistrationCard(view: RegistrationView): string {
@@ -127,10 +155,30 @@ export function renderDailyResults(view: DailyResultsView): string {
   return `${heading(view.sessionId)}\n\n<b>Итоги вечера</b>\n${teams}\n\n<b>Победы игроков сегодня</b>\n${players}`;
 }
 
-export function renderLeaderboard(rows: readonly LeaderboardRow[]): string {
-  const rendered = rows.length === 0 ? 'Пока нет завершённых игр.' : rows
-    .map((row) => `${row.rank}. ${escapeHtml(row.displayName)} — ${row.wins}`).join('\n');
-  return `<b>🏆 Рейтинг · Пятничный футбол · Пингвин</b>\n\n${rendered}`;
+export function renderLeaderboardPages(rows: readonly LeaderboardRow[]): readonly string[] {
+  const entries = rows.length === 0
+    ? ['Пока нет завершённых футбольных вечеров.']
+    : rows.map(leaderboardEntry);
+  const bodies: string[] = [];
+  let body = '';
+  for (const entry of entries) {
+    const candidate = body === '' ? entry : `${body}\n\n${entry}`;
+    if (body !== '' && candidate.length > LEADERBOARD_BODY_LIMIT) {
+      bodies.push(body);
+      body = entry;
+    } else {
+      body = candidate;
+    }
+  }
+  bodies.push(body);
+  const pages = bodies.map((currentBody, index) => {
+    const suffix = bodies.length === 1 ? '' : ` · ${index + 1}/${bodies.length}`;
+    return `<b>🏆 РЕЙТИНГ СЕЗОНА${suffix}</b>\n\n${currentBody}`;
+  });
+  if (pages.some((page) => page.length > TELEGRAM_MESSAGE_LIMIT)) {
+    throw new Error('Rendered leaderboard exceeds Telegram message limit');
+  }
+  return pages;
 }
 
 export function renderStatus(view: StatusView): string {
