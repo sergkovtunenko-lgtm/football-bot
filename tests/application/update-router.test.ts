@@ -107,6 +107,21 @@ describe('UpdateRouter registration text', () => {
     expect(service.setParty).toHaveBeenCalledWith('77', expect.any(Object), 1);
   });
 
+  it('uses @username when Telegram sends no usable name', async () => {
+    const { router, service } = fixture();
+    const update = message('+') as any;
+    update.message.from.first_name = '   ';
+    update.message.from.username = 'only_username';
+
+    await router.handle(update);
+
+    expect(service.setParty).toHaveBeenCalledWith('77', {
+      telegramUserId: '7',
+      displayName: '@only_username',
+      username: 'only_username',
+    }, 1);
+  });
+
   it('ignores registration text outside the configured group', async () => {
     const { router, service, telegram } = fixture();
     const update = message('+') as any;

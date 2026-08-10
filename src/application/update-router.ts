@@ -9,6 +9,8 @@ import type { FootballStore } from '../ports/store';
 import type { TelegramPort } from '../ports/telegram';
 import { renderStatus } from '../adapters/telegram/render';
 import { logError } from '../logger';
+import type { PlayerProfile } from '../domain/model';
+import { playerLabel } from '../domain/player-label';
 
 type RouterService = Pick<BotService,
   | 'setup'
@@ -344,8 +346,11 @@ function commandName(text: string): RecoveryCommand | undefined {
   return undefined;
 }
 
-function playerFrom(user: ParsedUser): { telegramUserId: string; displayName: string; username?: string } {
-  const displayName = user.lastName ? `${user.firstName} ${user.lastName}` : user.firstName;
+function playerFrom(user: ParsedUser): PlayerProfile {
+  const displayName = playerLabel({
+    displayName: [user.firstName, user.lastName].filter((part) => part !== undefined).join(' '),
+    ...(user.username === undefined ? {} : { username: user.username }),
+  });
   return user.username === undefined
     ? { telegramUserId: user.id, displayName }
     : { telegramUserId: user.id, displayName, username: user.username };
