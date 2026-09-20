@@ -15,19 +15,20 @@ const participants = (count: number): Participant[] => Array.from({ length: coun
 const zeroRandom = { int: () => 0 };
 
 describe('formTeams', () => {
-  it.each([[0, 0], [9, 0], [10, 2], [14, 2], [15, 3], [18, 3], [19, 3], [20, 4]])(
+  it.each([[0, 0], [5, 0], [6, 2], [9, 2], [10, 2], [11, 3], [14, 3], [15, 3], [16, 4], [19, 4], [20, 4]])(
     'forms %i participants into %i teams',
     (count, expectedTeams) => {
       expect(formTeams(participants(count), zeroRandom).teams).toHaveLength(expectedTeams);
     },
   );
 
-  it('creates three starters of five and evenly distributes three reserves for 18', () => {
+  it('creates a separate incomplete team instead of reserves for 18 participants', () => {
     const result = formTeams(participants(18), zeroRandom);
-    for (const team of result.teams) {
-      expect(result.members.filter((m) => m.teamNumber === team.teamNumber && m.role === 'starter')).toHaveLength(5);
-      expect(result.members.filter((m) => m.teamNumber === team.teamNumber && m.role === 'reserve')).toHaveLength(1);
-    }
+    expect(result.teams).toHaveLength(4);
+    expect(result.teams.map((team) => result.members.filter((member) => member.teamNumber === team.teamNumber))).toHaveLength(4);
+    expect(result.teams.map((team) => result.members.filter((member) => member.teamNumber === team.teamNumber).length))
+      .toEqual([5, 5, 5, 3]);
+    expect(result.members.every((member) => member.role === 'starter')).toBe(true);
     expect(new Set(result.members.map((m) => m.participantId)).size).toBe(18);
   });
 
@@ -64,17 +65,21 @@ describe('formTeams', () => {
         const active = participants(count);
         const waitlisted = { ...participants(1)[0]!, participantId: `wait-${seed}-${count}`, rosterStatus: 'waitlist' as const };
         const result = formTeams([...active, waitlisted], random);
-        expect(result.teams).toHaveLength(count < 10 ? 0 : Math.min(4, Math.floor(count / 5)));
+        const selectedCount = Math.min(count, 20);
+        expect(result.teams).toHaveLength(selectedCount < 6 ? 0 : Math.ceil(selectedCount / 5));
         expect(result.members.some((member) => member.participantId === waitlisted.participantId)).toBe(false);
         expect(new Set(result.members.map((member) => member.participantId)).size).toBe(result.members.length);
-        expect(result.members).toHaveLength(count < 10 ? 0 : Math.min(count, 20));
+        expect(result.members).toHaveLength(selectedCount < 6 ? 0 : selectedCount);
 
-        const reserveCounts = result.teams.map((team) => {
-          expect(result.members.filter((member) => member.teamNumber === team.teamNumber && member.role === 'starter')).toHaveLength(5);
-          return result.members.filter((member) => member.teamNumber === team.teamNumber && member.role === 'reserve').length;
+        const teamSizes = result.teams.map((team) => {
+          const members = result.members.filter((member) => member.teamNumber === team.teamNumber);
+          expect(members.every((member) => member.role === 'starter')).toBe(true);
+          return members.length;
         });
-        if (reserveCounts.length > 0) {
-          expect(Math.max(...reserveCounts) - Math.min(...reserveCounts)).toBeLessThanOrEqual(1);
+        if (teamSizes.length > 0) {
+          expect(teamSizes.slice(0, -1)).toEqual(Array(teamSizes.length - 1).fill(5));
+          expect(teamSizes.at(-1)).toBeGreaterThanOrEqual(1);
+          expect(teamSizes.at(-1)).toBeLessThanOrEqual(5);
         }
       }
     }

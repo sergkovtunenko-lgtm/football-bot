@@ -18,8 +18,8 @@ export function shuffled<T>(values: readonly T[], random: RandomSource): T[] {
 
 export function formTeams(participants: readonly Participant[], random: RandomSource): TeamFormation {
   const active = shuffled(participants.filter((participant) => participant.rosterStatus === 'active').slice(0, 20), random);
-  const teamCount = Math.min(4, Math.floor(active.length / 5));
-  if (teamCount < 2) return { teams: [], members: [] };
+  if (active.length < 6) return { teams: [], members: [] };
+  const teamCount = Math.min(4, Math.ceil(active.length / 5));
 
   const sessionId = active[0]!.sessionId;
   const teams = Array.from({ length: teamCount }, (_, index) => ({
@@ -33,9 +33,6 @@ export function formTeams(participants: readonly Participant[], random: RandomSo
       members.push({ ...participant, teamNumber: teams[teamIndex]!.teamNumber, role: 'starter' });
     }
   }
-  active.slice(teamCount * 5).forEach((participant, index) => {
-    members.push({ ...participant, teamNumber: teams[index % teamCount]!.teamNumber, role: 'reserve' });
-  });
 
   return { teams, members };
 }

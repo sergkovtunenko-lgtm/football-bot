@@ -76,14 +76,14 @@ describe('BotService', () => {
     expect(app.store.pendingEffects().some((entry) => entry.effect.kind === 'promotion_notice')).toBe(true);
   });
 
-  it('closes with insufficient players without starting play', async () => {
+  it('starts play with two incomplete teams when nine players close', async () => {
     const app = fixture();
     await open(app);
     await register(app, 9);
-    expect((await app.service.closeNow('close', '900')).value?.teamCount).toBe(0);
-    expect((await app.service.status()).sessionStatus).toBe('registration_closed');
+    expect((await app.service.closeNow('close', '900')).value?.teamCount).toBe(2);
+    expect((await app.service.status()).sessionStatus).toBe('playing');
     expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'teams')).toHaveLength(1);
-    expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'score_panel')).toHaveLength(0);
+    expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'score_panel')).toHaveLength(1);
   });
 
   it('persists two teams when ten players close', async () => {
@@ -114,18 +114,21 @@ describe('BotService', () => {
     await expect(app.service.recordWin('win', '900', 3)).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('awards player starters and reserves, but not guests', async () => {
+  it('awards players on an incomplete team, but not guests', async () => {
     const app = fixture();
     await open(app);
-    for (let i = 1; i <= 9; i += 1) await app.service.setParty(`r-${i}`, { telegramUserId: String(i), displayName: `P${i}` }, 1);
-    await app.service.setParty('party', { telegramUserId: '10', displayName: 'P10' }, 2);
+    for (let i = 1; i <= 6; i += 1) await app.service.setParty(`r-${i}`, { telegramUserId: String(i), displayName: `P${i}` }, 1);
+    await app.service.setParty('party', { telegramUserId: '7', displayName: 'P7' }, 2);
     await app.service.closeNow('close', '900');
     const members = await app.store.transact((tx) => tx.listTeamMembers('2026-07-24'));
-    const reserve = members.find((member) => member.role === 'reserve')!;
-    await app.service.recordWin('win', '900', reserve.teamNumber);
+    const incompleteTeam = members.filter((member) => member.teamNumber === 2);
+    expect(incompleteTeam).toHaveLength(3);
+    expect(incompleteTeam.every((member) => member.role === 'starter')).toBe(true);
+    const teamWithGuest = members.find((member) => member.kind === 'guest')!.teamNumber;
+    await app.service.recordWin('win', '900', teamWithGuest);
     const awards = await app.store.transact((tx) => tx.listWinAwards('2026-07-24'));
-    expect(awards.some((award) => award.telegramUserId === reserve.telegramUserId)).toBe(true);
-    expect(awards).toHaveLength(members.filter((member) => member.teamNumber === reserve.teamNumber && member.kind === 'player').length);
+    expect(awards.some((award) => award.telegramUserId === '7')).toBe(true);
+    expect(awards).toHaveLength(members.filter((member) => member.teamNumber === teamWithGuest && member.kind === 'player').length);
   });
 
   it('undoes only the highest active ordinal', async () => {
