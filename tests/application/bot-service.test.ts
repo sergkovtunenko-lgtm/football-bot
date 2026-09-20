@@ -117,18 +117,27 @@ describe('BotService', () => {
   it('awards players on an incomplete team, but not guests', async () => {
     const app = fixture();
     await open(app);
-    for (let i = 1; i <= 6; i += 1) await app.service.setParty(`r-${i}`, { telegramUserId: String(i), displayName: `P${i}` }, 1);
-    await app.service.setParty('party', { telegramUserId: '7', displayName: 'P7' }, 2);
+    for (let i = 1; i <= 7; i += 1) await app.service.setParty(`r-${i}`, { telegramUserId: String(i), displayName: `P${i}` }, 1);
+    await app.service.setParty('party', { telegramUserId: '8', displayName: 'P8' }, 2);
     await app.service.closeNow('close', '900');
     const members = await app.store.transact((tx) => tx.listTeamMembers('2026-07-24'));
-    const incompleteTeam = members.filter((member) => member.teamNumber === 2);
-    expect(incompleteTeam).toHaveLength(3);
+    const incompleteTeam = [...new Set(members.map((member) => member.teamNumber))]
+      .map((teamNumber) => members.filter((member) => member.teamNumber === teamNumber))
+      .find((team) => team.length < 5)!;
+    expect(incompleteTeam).toHaveLength(4);
     expect(incompleteTeam.every((member) => member.role === 'starter')).toBe(true);
-    const teamWithGuest = members.find((member) => member.kind === 'guest')!.teamNumber;
-    await app.service.recordWin('win', '900', teamWithGuest);
-    const awards = await app.store.transact((tx) => tx.listWinAwards('2026-07-24'));
-    expect(awards.some((award) => award.telegramUserId === '7')).toBe(true);
-    expect(awards).toHaveLength(members.filter((member) => member.teamNumber === teamWithGuest && member.kind === 'player').length);
+    expect(incompleteTeam.some((member) => member.kind === 'guest')).toBe(true);
+    const playerIds = incompleteTeam.flatMap((member) => member.kind === 'player' && member.telegramUserId
+      ? [member.telegramUserId]
+      : []);
+    expect(playerIds).toHaveLength(3);
+    await app.service.recordWin('win', '900', incompleteTeam[0]!.teamNumber);
+
+    const leaderboard = (await app.service.finish('finish', '900')).value?.leaderboard ?? [];
+
+    expect(leaderboard).toHaveLength(8);
+    expect(leaderboard.filter((row) => row.wins === 1).map((row) => row.telegramUserId).sort())
+      .toEqual(playerIds.sort());
   });
 
   it('undoes only the highest active ordinal', async () => {
