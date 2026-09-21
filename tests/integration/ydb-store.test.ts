@@ -249,6 +249,85 @@ describeYdb(suiteName, () => {
       { effect_id: 'effect-1', status: 'pending', attempts: 4 },
     ]);
   });
+
+  it('cancels only the target session and removes its local rows', async () => {
+    const target = session('cancel-target', 'finished');
+    const unrelated = session('cancel-other', 'finished');
+    const targetParticipant = participants(target.sessionId, 1)[0]!;
+    const unrelatedParticipant = participants(unrelated.sessionId, 1)[0]!;
+    await store.transact(async (tx) => {
+      await tx.upsertPlayer({ telegramUserId: '1', displayName: 'Global Player' }, '2026-07-21T08:00:00.000Z');
+      await tx.saveSession({ ...target, registrationMessageId: '10', scoreMessageId: '11' });
+      await tx.saveSession(unrelated);
+      await tx.replaceParticipants(target.sessionId, [targetParticipant]);
+      await tx.replaceParticipants(unrelated.sessionId, [unrelatedParticipant]);
+      await tx.replaceTeams(target.sessionId, [{ sessionId: target.sessionId, teamNumber: 1 }], [{
+        ...targetParticipant, teamNumber: 1, role: 'starter',
+      }]);
+      await tx.replaceTeams(unrelated.sessionId, [{ sessionId: unrelated.sessionId, teamNumber: 1 }], [{
+        ...unrelatedParticipant, teamNumber: 1, role: 'starter',
+      }]);
+      await tx.appendWin({
+        sessionId: target.sessionId, ordinal: 1n, teamNumber: 1, adminUserId: 'admin', createdAtIso: '2026-07-21T08:00:00.000Z',
+      }, [{ sessionId: target.sessionId, winOrdinal: 1n, telegramUserId: '1', displayName: 'Global Player' }]);
+      await tx.appendWin({
+        sessionId: unrelated.sessionId, ordinal: 1n, teamNumber: 1, adminUserId: 'admin', createdAtIso: '2026-07-21T08:00:00.000Z',
+      }, [{ sessionId: unrelated.sessionId, winOrdinal: 1n, telegramUserId: '1', displayName: 'Global Player' }]);
+      await tx.markScheduledAction('cancel-target:finish', target.sessionId, 'finish', '2026-07-21T08:00:00.000Z');
+      await tx.markScheduledAction('cancel-other:finish', unrelated.sessionId, 'finish', '2026-07-21T08:00:00.000Z');
+      await tx.enqueue('cancel-target-effect', { kind: 'teams', sessionId: target.sessionId }, '2026-07-21T08:00:00.000Z');
+      await tx.enqueue('cancel-other-effect', { kind: 'teams', sessionId: unrelated.sessionId }, '2026-07-21T08:00:00.000Z');
+      await tx.cancelSession(target.sessionId);
+    });
+
+    expect(await store.transact((tx) => tx.getSession(target.sessionId))).toEqual({
+      ...target, status: 'cancelled', nextQueuePosition: 1n, nextWinOrdinal: 1n,
+    });
+    expect(await store.transact((tx) => tx.listParticipants(target.sessionId))).toEqual([]);
+    expect(await store.transact((tx) => tx.listTeams(target.sessionId))).toEqual([]);
+    expect(await store.transact((tx) => tx.listTeamMembers(target.sessionId))).toEqual([]);
+    expect(await store.transact((tx) => tx.listWinEvents(target.sessionId))).toEqual([]);
+    expect(await store.transact((tx) => tx.listWinAwards(target.sessionId))).toEqual([]);
+    expect(await store.transact((tx) => tx.hasScheduledAction('cancel-target:finish'))).toBe(false);
+    expect(await store.transact((tx) => tx.listPlayers())).toEqual([{ telegramUserId: '1', displayName: 'Global Player' }]);
+    expect(await store.transact((tx) => tx.getSession(unrelated.sessionId))).toEqual(unrelated);
+    expect(await store.transact((tx) => tx.listParticipants(unrelated.sessionId))).toEqual([unrelatedParticipant]);
+    expect((await store.claimDueEffects('2026-07-21T08:00:00.000Z', 10, 'lease')).map((effect) => effect.effectId))
+      .toEqual(['cancel-other-effect']);
+  });
+
+  it('removes one completed participant without removing guests, other awards, or win events', async () => {
+    const target = session('attendance-target', 'finished');
+    const player = participants(target.sessionId, 1)[0]!;
+    const guest: Participant = {
+      participantId: 'guest', sessionId: target.sessionId, ownerUserId: '1', displayName: 'Guest', kind: 'guest', guestNumber: 1,
+      queuePosition: 2n, rosterStatus: 'active',
+    };
+    const event = {
+      sessionId: target.sessionId, ordinal: 1n, teamNumber: 1 as const, adminUserId: 'admin', createdAtIso: '2026-07-21T08:00:00.000Z',
+    };
+    await store.transact(async (tx) => {
+      await tx.saveSession(target);
+      await tx.replaceParticipants(target.sessionId, [player, guest]);
+      await tx.replaceTeams(target.sessionId, [{ sessionId: target.sessionId, teamNumber: 1 }], [
+        { ...player, teamNumber: 1, role: 'starter' }, { ...guest, teamNumber: 1, role: 'starter' },
+      ]);
+      await tx.appendWin(event, [
+        { sessionId: target.sessionId, winOrdinal: 1n, telegramUserId: '1', displayName: 'Player 1' },
+        { sessionId: target.sessionId, winOrdinal: 1n, telegramUserId: 'owner-award', displayName: 'Owner' },
+      ]);
+      await tx.removeCompletedParticipant(target.sessionId, player.participantId);
+    });
+
+    expect(await store.transact((tx) => tx.listParticipants(target.sessionId))).toEqual([guest]);
+    expect(await store.transact((tx) => tx.listTeamMembers(target.sessionId))).toEqual([
+      { ...guest, teamNumber: 1, role: 'starter' },
+    ]);
+    expect(await store.transact((tx) => tx.listWinAwards(target.sessionId))).toEqual([
+      { sessionId: target.sessionId, winOrdinal: 1n, telegramUserId: 'owner-award', displayName: 'Owner' },
+    ]);
+    expect(await store.transact((tx) => tx.listWinEvents(target.sessionId))).toEqual([event]);
+  });
 });
 
 interface OutboxState {

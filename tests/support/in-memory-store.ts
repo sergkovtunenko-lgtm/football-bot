@@ -195,9 +195,52 @@ export class InMemoryFootballStore implements FootballStore {
       listPlayers: async () => structuredClone([...state.players.values()]),
       getSession: async (sessionId) => structuredClone(state.sessions.get(sessionId)),
       saveSession: async (session) => { state.sessions.set(session.sessionId, structuredClone(session)); },
+      cancelSession: async (sessionId) => {
+        const session = state.sessions.get(sessionId);
+        if (!session) throw new Error('session not found');
+        state.sessions.set(sessionId, {
+          sessionId,
+          status: 'cancelled',
+          nextQueuePosition: 1n,
+          nextWinOrdinal: 1n,
+        });
+        state.participants.delete(sessionId);
+        state.teams.delete(sessionId);
+        state.members.delete(sessionId);
+        for (const [key, event] of state.winEvents) {
+          if (event.sessionId === sessionId) state.winEvents.delete(key);
+        }
+        for (const [key, award] of state.winAwards) {
+          if (award.sessionId === sessionId) state.winAwards.delete(key);
+        }
+        for (const [key, action] of state.scheduledActions) {
+          if (action.sessionId === sessionId) state.scheduledActions.delete(key);
+        }
+        for (const [key, effect] of state.effects) {
+          if ('sessionId' in effect.effect && effect.effect.sessionId === sessionId) state.effects.delete(key);
+        }
+      },
       listParticipants: async (sessionId) => structuredClone(state.participants.get(sessionId) ?? []),
       replaceParticipants: async (sessionId, participants) => {
         state.participants.set(sessionId, structuredClone([...participants]));
+      },
+      removeCompletedParticipant: async (sessionId, participantId) => {
+        const session = state.sessions.get(sessionId);
+        if (!session) throw new Error('session not found');
+        if (session.status !== 'finished') throw new Error('session is not finished');
+        const participants = state.participants.get(sessionId) ?? [];
+        const participant = participants.find((item) => item.participantId === participantId);
+        if (!participant) throw new Error('participant not found');
+        state.participants.set(sessionId, participants.filter((item) => item.participantId !== participantId));
+        state.members.set(sessionId, (state.members.get(sessionId) ?? [])
+          .filter((item) => item.participantId !== participantId));
+        if (participant.telegramUserId !== undefined) {
+          for (const [key, award] of state.winAwards) {
+            if (award.sessionId === sessionId && award.telegramUserId === participant.telegramUserId) {
+              state.winAwards.delete(key);
+            }
+          }
+        }
       },
       listTeams: async (sessionId) => structuredClone(state.teams.get(sessionId) ?? []),
       listTeamMembers: async (sessionId) => structuredClone(state.members.get(sessionId) ?? []),

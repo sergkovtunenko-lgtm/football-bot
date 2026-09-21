@@ -271,6 +271,32 @@ class YdbFootballTransaction implements FootballTransaction {
     `;
   }
 
+  async cancelSession(sessionId: string): Promise<void> {
+    const session = await this.getSession(sessionId);
+    if (!session) throw new Error('session not found');
+    await this.tx`DELETE FROM win_awards WHERE session_id = ${sessionId}`;
+    await this.tx`DELETE FROM win_events WHERE session_id = ${sessionId}`;
+    await this.tx`DELETE FROM team_members WHERE session_id = ${sessionId}`;
+    await this.tx`DELETE FROM teams WHERE session_id = ${sessionId}`;
+    await this.tx`DELETE FROM participants WHERE session_id = ${sessionId}`;
+    await this.tx`DELETE FROM scheduled_actions WHERE session_id = ${sessionId}`;
+    const [effectRows] = await this.tx<[{ effect_id: string; payload_json: string }]>`
+      SELECT effect_id, payload_json FROM outbox
+    `;
+    for (const effectRow of effectRows) {
+      const effect = parseEffect(effectRow.payload_json);
+      if ('sessionId' in effect && effect.sessionId === sessionId) {
+        await this.tx`DELETE FROM outbox WHERE effect_id = ${effectRow.effect_id}`;
+      }
+    }
+    await this.saveSession({
+      sessionId,
+      status: 'cancelled',
+      nextQueuePosition: 1n,
+      nextWinOrdinal: 1n,
+    });
+  }
+
   async listParticipants(sessionId: string): Promise<Participant[]> {
     const [rows] = await this.tx<[ParticipantRow]>`
       SELECT session_id, participant_id, owner_user_id, telegram_user_id, display_name,
@@ -297,6 +323,33 @@ class YdbFootballTransaction implements FootballTransaction {
         kind, guest_number, queue_position, roster_status
       ) VALUES ${join(rows, ', ')}
     `;
+  }
+
+  async removeCompletedParticipant(sessionId: string, participantId: string): Promise<void> {
+    const session = await this.getSession(sessionId);
+    if (!session) throw new Error('session not found');
+    if (session.status !== 'finished') throw new Error('session is not finished');
+    const [rows] = await this.tx<[ParticipantRow]>`
+      SELECT session_id, participant_id, owner_user_id, telegram_user_id, display_name,
+             kind, guest_number, queue_position, roster_status
+      FROM participants
+      WHERE session_id = ${sessionId} AND participant_id = ${participantId}
+    `;
+    const row = rows[0];
+    if (!row) throw new Error('participant not found');
+    const participant = participantFromRow(row);
+    await this.tx`
+      DELETE FROM team_members WHERE session_id = ${sessionId} AND participant_id = ${participantId}
+    `;
+    await this.tx`
+      DELETE FROM participants WHERE session_id = ${sessionId} AND participant_id = ${participantId}
+    `;
+    if (participant.telegramUserId !== undefined) {
+      await this.tx`
+        DELETE FROM win_awards
+        WHERE session_id = ${sessionId} AND telegram_user_id = ${participant.telegramUserId}
+      `;
+    }
   }
 
   async listTeams(sessionId: string): Promise<Team[]> {
@@ -611,6 +664,9 @@ function parseEffect(json: string): TelegramEffect {
     case 'final_results':
       if (typeof value.sessionId === 'string') return { kind: value.kind, sessionId: value.sessionId };
       break;
+    case 'session_cancelled':
+      if (typeof value.sessionId === 'string') return { kind: value.kind, sessionId: value.sessionId };
+      break;
     case 'promotion_notice':
       if (typeof value.sessionId === 'string' && typeof value.ownerUserId === 'string') {
         return { kind: value.kind, sessionId: value.sessionId, ownerUserId: value.ownerUserId };
@@ -631,7 +687,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function sessionStatus(value: string): Session['status'] {
   if (value === 'scheduled' || value === 'registration_open' || value === 'registration_closed'
-    || value === 'playing' || value === 'finished') return value;
+    || value === 'playing' || value === 'finished' || value === 'cancelled') return value;
   throw new Error(`invalid session status: ${value}`);
 }
 

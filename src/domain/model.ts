@@ -3,7 +3,8 @@ export type SessionStatus =
   | 'registration_open'
   | 'registration_closed'
   | 'playing'
-  | 'finished';
+  | 'finished'
+  | 'cancelled';
 export type ParticipantKind = 'player' | 'guest';
 export type RosterStatus = 'active' | 'waitlist';
 export type TeamRole = 'starter' | 'reserve';

@@ -6,6 +6,7 @@ export type TelegramEffect =
   | { kind: 'teams'; sessionId: string }
   | { kind: 'score_panel'; sessionId: string }
   | { kind: 'final_results'; sessionId: string }
+  | { kind: 'session_cancelled'; sessionId: string }
   | { kind: 'admin_error'; correlationId: string; summary: string };
 export type AdminErrorEffect = Extract<TelegramEffect, { kind: 'admin_error' }>;
 
@@ -26,7 +27,9 @@ export interface FootballTransaction {
   listPlayers(): Promise<PlayerProfile[]>;
   getSession(sessionId: string): Promise<Session | undefined>;
   saveSession(session: Session): Promise<void>;
+  cancelSession(sessionId: string): Promise<void>;
   listParticipants(sessionId: string): Promise<Participant[]>;
+  removeCompletedParticipant(sessionId: string, participantId: string): Promise<void>;
   replaceParticipants(sessionId: string, participants: readonly Participant[]): Promise<void>;
   listTeams(sessionId: string): Promise<Team[]>;
   listTeamMembers(sessionId: string): Promise<TeamMember[]>;
