@@ -87,6 +87,18 @@ describe('OutboxWorker delivery and semantic snapshots', () => {
     expect(pending(app)).toEqual([]);
   });
 
+  it('sends a cancellation notice to the configured group without editing old cards', async () => {
+    const app = fixture();
+    await seed(app, { kind: 'session_cancelled', sessionId: SESSION_ID }, baseSession({
+      status: 'cancelled', registrationMessageId: '41', scoreMessageId: '42',
+    }));
+
+    expect(await app.worker.flush()).toEqual({ sent: 1, rescheduled: 0 });
+    expect(app.telegram.sendMessage).toHaveBeenCalledWith('-1001', '⚠️ Сбор 2026-07-24 отменён.');
+    expect(app.telegram.editMessage).not.toHaveBeenCalled();
+    expect(pending(app)).toEqual([]);
+  });
+
   it('edits the stored registration card message', async () => {
     const app = fixture();
     await seed(app, { kind: 'registration_card', sessionId: SESSION_ID }, baseSession({ registrationMessageId: '41' }));

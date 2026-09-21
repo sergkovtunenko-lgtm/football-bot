@@ -147,6 +147,40 @@ export function finishConfirmationKeyboard(): InlineKeyboard {
   ]] };
 }
 
+export function renderCancellationConfirmation(sessionId: string): string {
+  return `⚠️ Вы уверены, что хотите отменить сбор ${sessionId}?`;
+}
+
+export function cancellationConfirmationKeyboard(): InlineKeyboard {
+  return { inline_keyboard: [[
+    { text: '⚠️ Да, отменить сбор', callback_data: 'v1:c:confirm' },
+  ]] };
+}
+
+export function renderAbsenceSelection(sessionId: string): string {
+  return `Кого отметить отсутствующим на сборе ${sessionId}?`;
+}
+
+export function absenceSelectionKeyboard(
+  sessionId: string,
+  participants: readonly { participantId: string; displayName: string }[],
+): InlineKeyboard {
+  return { inline_keyboard: participants.map((participant) => [{
+    text: participant.displayName,
+    callback_data: `v1:a:s:${sessionId}:${participant.participantId}`,
+  }]) };
+}
+
+export function renderAbsenceConfirmation(displayName: string): string {
+  return `Отметить ${escapeHtml(displayName)} отсутствовавшим?`;
+}
+
+export function absenceConfirmationKeyboard(sessionId: string, participantId: string): InlineKeyboard {
+  return { inline_keyboard: [[
+    { text: '✅ Подтвердить отсутствие', callback_data: `v1:a:c:${sessionId}:${participantId}` },
+  ]] };
+}
+
 export function renderDailyResults(view: DailyResultsView): string {
   const teams = view.teams.length === 0 ? 'Нет сформированных команд' : view.teams
     .map((team) => `${teamLabel(team.teamNumber)} — ${team.wins}`).join('\n');

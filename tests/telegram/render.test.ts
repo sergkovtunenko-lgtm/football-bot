@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  absenceConfirmationKeyboard,
+  absenceSelectionKeyboard,
+  cancellationConfirmationKeyboard,
   escapeHtml,
   finishConfirmationKeyboard,
   registrationKeyboard,
   renderDailyResults,
+  renderAbsenceConfirmation,
+  renderAbsenceSelection,
+  renderCancellationConfirmation,
   renderLeaderboardPages,
   renderPromotion,
   renderRegistrationCard,
@@ -163,5 +169,36 @@ describe('Telegram rendering', () => {
       { text: '✅ Да, завершить', callback_data: 'v1:w:confirm_finish' },
       { text: '❌ Отмена', callback_data: 'v1:w:undo' },
     ]] });
+  });
+
+  it('renders explicit protected cancellation and attendance-correction controls with compact callbacks', () => {
+    expect(renderCancellationConfirmation('2026-07-24')).toContain('отменить');
+    expect(cancellationConfirmationKeyboard()).toEqual({ inline_keyboard: [[
+      { text: '⚠️ Да, отменить сбор', callback_data: 'v1:c:confirm' },
+    ]] });
+
+    const participants = [
+      { participantId: 'player-123', displayName: '<Иван>' },
+      { participantId: 'guest-456', displayName: 'Гость & друг' },
+    ];
+    expect(renderAbsenceSelection('2026-07-17')).toContain('отсутствующим');
+    expect(absenceSelectionKeyboard('2026-07-17', participants)).toEqual({ inline_keyboard: [
+      [{ text: '<Иван>', callback_data: 'v1:a:s:2026-07-17:player-123' }],
+      [{ text: 'Гость & друг', callback_data: 'v1:a:s:2026-07-17:guest-456' }],
+    ] });
+    expect(renderAbsenceConfirmation('<Иван>')).toContain('&lt;Иван&gt;');
+    expect(absenceConfirmationKeyboard('2026-07-17', 'player-123')).toEqual({ inline_keyboard: [[
+      { text: '✅ Подтвердить отсутствие', callback_data: 'v1:a:c:2026-07-17:player-123' },
+    ]] });
+
+    for (const keyboard of [
+      cancellationConfirmationKeyboard(),
+      absenceSelectionKeyboard('2026-07-17', participants),
+      absenceConfirmationKeyboard('2026-07-17', '12345678-1234-1234-1234-123456789012'),
+    ]) {
+      for (const row of keyboard.inline_keyboard) {
+        for (const button of row) expect(Buffer.byteLength(button.callback_data)).toBeLessThan(64);
+      }
+    }
   });
 });

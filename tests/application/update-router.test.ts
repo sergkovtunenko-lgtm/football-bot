@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ForbiddenError, InvalidStateError } from '../../src/application/bot-service';
+import { ForbiddenError, InvalidStateError, NotFoundError } from '../../src/application/bot-service';
 import { UpdateRouter } from '../../src/application/update-router';
 import type { AppConfig } from '../../src/config';
 import type { FootballStore } from '../../src/ports/store';
@@ -24,6 +24,15 @@ function fixture() {
     recordWin: vi.fn().mockResolvedValue({ duplicate: false }),
     undoLastWin: vi.fn().mockResolvedValue({ duplicate: false }),
     finish: vi.fn().mockResolvedValue({ duplicate: false }),
+    cancelCurrentSession: vi.fn().mockResolvedValue({ duplicate: false }),
+    latestFinishedParticipants: vi.fn().mockResolvedValue({
+      sessionId: '2026-07-17',
+      participants: [
+        { participantId: 'player-123', displayName: 'Иван' },
+        { participantId: 'guest-456', displayName: 'Гость' },
+      ],
+    }),
+    removeAbsentParticipant: vi.fn().mockResolvedValue({ duplicate: false }),
     getPartySize: vi.fn().mockResolvedValue(3),
     registrationView: vi.fn().mockResolvedValue({
       sessionId: '2026-07-24', active: [{ displayName: 'Игрок' }], waitlist: [], maxActive: 20,
@@ -262,6 +271,39 @@ describe('UpdateRouter callbacks', () => {
     expect(service.recordWin).not.toHaveBeenCalled();
     expect(telegram.answerCallback).toHaveBeenCalledOnce();
   });
+
+  it('confirms cancellation only after an admin callback', async () => {
+    const { router, service, telegram } = fixture();
+    await router.handle(callback('v1:c:confirm'));
+    expect(service.cancelCurrentSession).toHaveBeenCalledWith('77', '900');
+    expect(telegram.answerCallback).toHaveBeenCalledWith('cq', 'Готово', undefined);
+
+    const nonAdmin = fixture();
+    await nonAdmin.router.handle(callback('v1:c:confirm', 7));
+    expect(nonAdmin.service.cancelCurrentSession).not.toHaveBeenCalled();
+    expect(nonAdmin.telegram.answerCallback).toHaveBeenCalledWith('cq', 'Только администратор', true);
+  });
+
+  it('opens an absence confirmation for a selected latest-finished participant and removes only on confirmation', async () => {
+    const { router, service, telegram } = fixture();
+    await router.handle(callback('v1:a:s:2026-07-17:player-123'));
+    expect(service.latestFinishedParticipants).toHaveBeenCalledOnce();
+    expect(service.removeAbsentParticipant).not.toHaveBeenCalled();
+    expect(telegram.sendMessage).toHaveBeenCalledWith('-1001', expect.stringContaining('Иван'), expect.objectContaining({
+      inline_keyboard: [[expect.objectContaining({ callback_data: 'v1:a:c:2026-07-17:player-123' })]],
+    }));
+
+    await router.handle(callback('v1:a:c:2026-07-17:player-123'));
+    expect(service.removeAbsentParticipant).toHaveBeenCalledWith('77', '900', '2026-07-17', 'player-123');
+  });
+
+  it('alerts a non-admin absence callback without reading candidates or changing state', async () => {
+    const { router, service, telegram } = fixture();
+    await router.handle(callback('v1:a:s:2026-07-17:player-123', 7));
+    expect(service.latestFinishedParticipants).not.toHaveBeenCalled();
+    expect(service.removeAbsentParticipant).not.toHaveBeenCalled();
+    expect(telegram.answerCallback).toHaveBeenCalledWith('cq', 'Только администратор', true);
+  });
 });
 
 describe('UpdateRouter recovery commands and validation', () => {
@@ -305,7 +347,40 @@ describe('UpdateRouter recovery commands and validation', () => {
     expect(telegram.editMessage).toHaveBeenCalledWith('-1001', '5', expect.stringContaining('Завершить'), expect.any(Object));
   });
 
-  it.each(['/setup', '/status', '/open', '/close', '/undo', '/finish'])('requires admin for %s', async (command) => {
+  it('/cancel and /absent show protected confirmation and participant selection without changing state', async () => {
+    const { router, service, telegram } = fixture();
+    const cancel = message('/cancel') as any;
+    cancel.message.from.id = 900;
+    await router.handle(cancel);
+    expect(service.cancelCurrentSession).not.toHaveBeenCalled();
+    expect(telegram.sendMessage).toHaveBeenCalledWith('-1001', expect.stringContaining('отменить'), expect.objectContaining({
+      inline_keyboard: [[expect.objectContaining({ callback_data: 'v1:c:confirm' })]],
+    }));
+
+    vi.mocked(telegram.sendMessage).mockClear();
+    const absent = message('/absent') as any;
+    absent.message.from.id = 900;
+    await router.handle(absent);
+    expect(service.latestFinishedParticipants).toHaveBeenCalledOnce();
+    const keyboard = vi.mocked(telegram.sendMessage).mock.calls[0]?.[2];
+    expect(keyboard?.inline_keyboard.flat().map((button) => button.callback_data)).toEqual([
+      'v1:a:s:2026-07-17:player-123', 'v1:a:s:2026-07-17:guest-456',
+    ]);
+  });
+
+  it('reports an unavailable attendance correction without changing state', async () => {
+    const { router, service, telegram } = fixture();
+    service.latestFinishedParticipants.mockRejectedValue(new NotFoundError());
+    const absent = message('/absent') as any;
+    absent.message.from.id = 900;
+
+    await router.handle(absent);
+
+    expect(service.removeAbsentParticipant).not.toHaveBeenCalled();
+    expect(telegram.sendMessage).toHaveBeenCalledWith('-1001', 'Эта кнопка уже неактуальна');
+  });
+
+  it.each(['/setup', '/status', '/open', '/close', '/undo', '/finish', '/cancel', '/absent'])('requires admin for %s', async (command) => {
     const { router, service, telegram } = fixture();
     await router.handle(message(command));
     expect(service.setup).not.toHaveBeenCalled();
@@ -313,7 +388,7 @@ describe('UpdateRouter recovery commands and validation', () => {
     expect(telegram.sendMessage).toHaveBeenCalledWith('-1001', 'Только администратор');
   });
 
-  it.each(['/status', '/open', '/close', '/undo', '/finish'])('ignores %s outside the configured group before admin checks', async (command) => {
+  it.each(['/status', '/open', '/close', '/undo', '/finish', '/cancel', '/absent'])('ignores %s outside the configured group before admin checks', async (command) => {
     const { router, service, telegram } = fixture();
     const update = message(command) as any;
     update.message.chat.id = -2002;

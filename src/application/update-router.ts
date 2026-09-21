@@ -7,7 +7,15 @@ import {
 } from './bot-service';
 import type { FootballStore } from '../ports/store';
 import type { TelegramPort } from '../ports/telegram';
-import { renderStatus } from '../adapters/telegram/render';
+import {
+  absenceConfirmationKeyboard,
+  absenceSelectionKeyboard,
+  cancellationConfirmationKeyboard,
+  renderAbsenceConfirmation,
+  renderAbsenceSelection,
+  renderCancellationConfirmation,
+  renderStatus,
+} from '../adapters/telegram/render';
 import { logError } from '../logger';
 import type { PlayerProfile } from '../domain/model';
 import { playerLabel } from '../domain/player-label';
@@ -20,6 +28,9 @@ type RouterService = Pick<BotService,
   | 'recordWin'
   | 'undoLastWin'
   | 'finish'
+  | 'cancelCurrentSession'
+  | 'latestFinishedParticipants'
+  | 'removeAbsentParticipant'
   | 'getPartySize'
   | 'registrationView'
   | 'status'>;
@@ -143,6 +154,21 @@ export class UpdateRouter {
       case '/finish':
         await this.showCommandFinishConfirmation(message.chatId);
         break;
+      case '/cancel':
+        await this.telegram.sendMessage(
+          message.chatId,
+          renderCancellationConfirmation((await this.service.status()).sessionId),
+          cancellationConfirmationKeyboard(),
+        );
+        break;
+      case '/absent':
+        try {
+          await this.showAbsenceSelection(message.chatId);
+        } catch (error) {
+          if (!(error instanceof NotFoundError)) throw error;
+          await this.telegram.sendMessage(message.chatId, 'Эта кнопка уже неактуальна');
+        }
+        break;
     }
   }
 
@@ -159,6 +185,7 @@ export class UpdateRouter {
         const data = callback.data;
         const registration = registrationCallback(data);
         const team = winCallback(data);
+        const absence = absenceCallback(data);
         const isScoreAction = team !== undefined || data === 'v1:w:undo'
           || data === 'v1:w:finish' || data === 'v1:w:confirm_finish';
         if (registration !== undefined) {
@@ -196,6 +223,28 @@ export class UpdateRouter {
         } else if (data === 'v1:w:confirm_finish') {
           this.requireAdmin(callback.from.id);
           await this.service.finish(updateId, callback.from.id);
+        } else if (data === 'v1:c:confirm') {
+          this.requireAdmin(callback.from.id);
+          await this.service.cancelCurrentSession(updateId, callback.from.id);
+        } else if (absence?.kind === 'select') {
+          this.requireAdmin(callback.from.id);
+          const latest = await this.service.latestFinishedParticipants();
+          if (latest.sessionId !== absence.sessionId) throw new NotFoundError('finished session not found');
+          const participant = latest.participants.find((candidate) => candidate.participantId === absence.participantId);
+          if (!participant) throw new NotFoundError('participant not found');
+          await this.telegram.sendMessage(
+            message.chatId,
+            renderAbsenceConfirmation(participant.displayName),
+            absenceConfirmationKeyboard(absence.sessionId, absence.participantId),
+          );
+        } else if (absence?.kind === 'confirm') {
+          this.requireAdmin(callback.from.id);
+          await this.service.removeAbsentParticipant(
+            updateId,
+            callback.from.id,
+            absence.sessionId,
+            absence.participantId,
+          );
         } else {
           answer = 'Кнопка не поддерживается';
         }
@@ -245,9 +294,18 @@ export class UpdateRouter {
   private async showFinishConfirmation(chatId: string, messageId: string): Promise<void> {
     await this.telegram.editMessage(chatId, messageId, 'Завершить игровой вечер?', finishConfirmationKeyboard());
   }
+
+  private async showAbsenceSelection(chatId: string): Promise<void> {
+    const latest = await this.service.latestFinishedParticipants();
+    await this.telegram.sendMessage(
+      chatId,
+      renderAbsenceSelection(latest.sessionId),
+      absenceSelectionKeyboard(latest.sessionId, latest.participants),
+    );
+  }
 }
 
-type RecoveryCommand = '/setup' | '/status' | '/open' | '/close' | '/undo' | '/finish';
+type RecoveryCommand = '/setup' | '/status' | '/open' | '/close' | '/undo' | '/finish' | '/cancel' | '/absent';
 
 function finishConfirmationKeyboard() {
   return { inline_keyboard: [[
@@ -339,10 +397,27 @@ function winCallback(data: string | undefined): 1 | 2 | 3 | 4 | undefined {
   return undefined;
 }
 
+interface AbsenceCallback {
+  kind: 'select' | 'confirm';
+  sessionId: string;
+  participantId: string;
+}
+
+function absenceCallback(data: string | undefined): AbsenceCallback | undefined {
+  const match = /^v1:a:([sc]):(\d{4}-\d{2}-\d{2}):([^:]+)$/.exec(data ?? '');
+  if (!match?.[1] || !match[2] || !match[3]) return undefined;
+  return {
+    kind: match[1] === 's' ? 'select' : 'confirm',
+    sessionId: match[2],
+    participantId: match[3],
+  };
+}
+
 function commandName(text: string): RecoveryCommand | undefined {
   const first = text.split(/\s+/, 1)[0]?.split('@', 1)[0];
   if (first === '/setup' || first === '/status' || first === '/open'
-    || first === '/close' || first === '/undo' || first === '/finish') return first;
+    || first === '/close' || first === '/undo' || first === '/finish'
+    || first === '/cancel' || first === '/absent') return first;
   return undefined;
 }
 

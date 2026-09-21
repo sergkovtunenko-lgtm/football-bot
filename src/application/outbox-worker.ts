@@ -195,6 +195,11 @@ export class OutboxWorker {
             ...renderLeaderboardPages(leaderboard).map((html) => ({ html })),
           ] };
         }
+        case 'session_cancelled':
+          return {
+            chatId: groupChatId,
+            messages: [{ html: `⚠️ Сбор ${effect.sessionId} отменён.` }],
+          };
         case 'admin_error':
           return {
             chatId: groupChatId,
