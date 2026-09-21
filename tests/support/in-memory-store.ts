@@ -217,7 +217,8 @@ export class InMemoryFootballStore implements FootballStore {
           if (action.sessionId === sessionId) state.scheduledActions.delete(key);
         }
         for (const [key, effect] of state.effects) {
-          if ('sessionId' in effect.effect && effect.effect.sessionId === sessionId) state.effects.delete(key);
+          if ('sessionId' in effect.effect && effect.effect.sessionId === sessionId
+            && effect.effect.kind !== 'session_cancelled') state.effects.delete(key);
         }
       },
       listParticipants: async (sessionId) => structuredClone(state.participants.get(sessionId) ?? []),
@@ -275,6 +276,8 @@ export class InMemoryFootballStore implements FootballStore {
         if (state.scheduledActions.has(actionKey)) throw new Error('duplicate scheduled action');
         state.scheduledActions.set(actionKey, { sessionId, kind, executedAtIso });
       },
+      hasSessionCancellationNotice: async (sessionId) => [...state.effects.values()]
+        .some((effect) => effect.effect.kind === 'session_cancelled' && effect.effect.sessionId === sessionId),
       enqueue: async (effectId, effect, nowIso) => {
         if (this.rejectNextEnqueue) {
           this.rejectNextEnqueue = false;

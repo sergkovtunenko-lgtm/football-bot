@@ -150,9 +150,12 @@ export class BotService {
     const sessionId = sessionIdForCurrentCycle(now);
     return this.store.transactUpdate(updateId, nowIso, async (tx) => {
       this.requireAdmin(actorUserId);
-      if (await tx.getSession(sessionId)) await tx.cancelSession(sessionId);
-      await tx.saveSession(cancelledSession(sessionId));
-      await tx.enqueue(this.newId(), { kind: 'session_cancelled', sessionId }, nowIso);
+      const existing = await tx.getSession(sessionId);
+      if (existing) await tx.cancelSession(sessionId);
+      else await tx.saveSession(cancelledSession(sessionId));
+      if (!await tx.hasSessionCancellationNotice(sessionId)) {
+        await tx.enqueue(this.newId(), { kind: 'session_cancelled', sessionId }, nowIso);
+      }
       return { sessionId };
     });
   }

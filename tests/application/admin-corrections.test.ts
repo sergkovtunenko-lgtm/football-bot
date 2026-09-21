@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { OutboxWorker } from '../../src/application/outbox-worker';
 import { BotService, ForbiddenError, NotFoundError } from '../../src/application/bot-service';
 import type { Participant, Session, TeamMember, WinAward, WinEvent } from '../../src/domain/model';
 import { InMemoryFootballStore } from '../support/in-memory-store';
+import { FakeTelegram } from '../support/fake-telegram';
 
 const clock = { now: () => new Date('2026-07-21T08:00:00.000Z') };
 const random = { int: () => 0 };
@@ -57,6 +59,23 @@ describe('admin cancellation workflow', () => {
     expect(await app.service.cancelCurrentSession('cancel', '900')).toMatchObject({ duplicate: false });
     expect(await app.service.cancelCurrentSession('cancel', '900')).toEqual({ duplicate: true });
     expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'session_cancelled')).toHaveLength(1);
+  });
+
+  it('does not requeue a delivered cancellation notice for a distinct confirmation', async () => {
+    const app = fixture();
+    const telegram = new FakeTelegram();
+    const worker = new OutboxWorker(app.store, telegram, clock, () => 'lease-1');
+    await app.service.setup('setup', '900', '-1001');
+
+    await app.service.cancelCurrentSession('first-cancel', '900');
+    expect(await worker.flush()).toEqual({ sent: 1, rescheduled: 0 });
+    expect(telegram.calls.filter((call) => call.kind === 'sendMessage')).toHaveLength(1);
+
+    await app.service.cancelCurrentSession('second-cancel', '900');
+
+    expect(app.store.pendingEffects()).toEqual([]);
+    expect(await worker.flush()).toEqual({ sent: 0, rescheduled: 0 });
+    expect(telegram.calls.filter((call) => call.kind === 'sendMessage')).toHaveLength(1);
   });
 
   it('leaves one cancellation notice after a second nonduplicate cancellation', async () => {

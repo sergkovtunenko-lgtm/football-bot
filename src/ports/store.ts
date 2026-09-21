@@ -41,6 +41,7 @@ export interface FootballTransaction {
   listCompletedSessionIds(): Promise<Set<string>>;
   hasScheduledAction(actionKey: string): Promise<boolean>;
   markScheduledAction(actionKey: string, sessionId: string, kind: string, executedAtIso: string): Promise<void>;
+  hasSessionCancellationNotice(sessionId: string): Promise<boolean>;
   enqueue(effectId: string, effect: TelegramEffect, nowIso: string): Promise<void>;
 }
 

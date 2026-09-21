@@ -285,7 +285,7 @@ class YdbFootballTransaction implements FootballTransaction {
     `;
     for (const effectRow of effectRows) {
       const effect = parseEffect(effectRow.payload_json);
-      if ('sessionId' in effect && effect.sessionId === sessionId) {
+      if ('sessionId' in effect && effect.sessionId === sessionId && effect.kind !== 'session_cancelled') {
         await this.tx`DELETE FROM outbox WHERE effect_id = ${effectRow.effect_id}`;
       }
     }
@@ -500,6 +500,16 @@ class YdbFootballTransaction implements FootballTransaction {
       INSERT INTO scheduled_actions (action_key, session_id, kind, executed_at)
       VALUES (${actionKey}, ${sessionId}, ${kind}, ${timestamp(executedAtIso)})
     `;
+  }
+
+  async hasSessionCancellationNotice(sessionId: string): Promise<boolean> {
+    const [rows] = await this.tx<[{ payload_json: string }]>`
+      SELECT payload_json FROM outbox WHERE kind = ${'session_cancelled'}
+    `;
+    return rows.some((row) => {
+      const effect = parseEffect(row.payload_json);
+      return effect.kind === 'session_cancelled' && effect.sessionId === sessionId;
+    });
   }
 
   async enqueue(effectId: string, effect: TelegramEffect, nowIso: string): Promise<void> {
