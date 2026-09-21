@@ -61,6 +61,10 @@ describe('Moscow schedule', () => {
     expect(due('2026-07-23T08:00:00Z', [], 'finished')).toEqual([]);
   });
 
+  it('does not reopen a cancelled current session', () => {
+    expect(due('2026-07-23T08:00:00Z', [], 'cancelled')).toEqual([]);
+  });
+
   it('uses the same stable key for repeated calls in one minute', () => {
     expect(due('2026-07-23T08:00:00Z', [], 'registration_open')).toEqual(
       due('2026-07-23T08:00:59Z', [], 'registration_open'),
@@ -90,6 +94,13 @@ describe('Moscow schedule', () => {
 
   it('reports the next Tuesday opening after finish', () => {
     expect(nextScheduleAction(new Date('2026-07-24T18:00:00Z'), 'finished')).toEqual({
+      kind: 'open',
+      atIso: '2026-07-28T07:00:00.000Z',
+    });
+  });
+
+  it('reports the next Tuesday opening after cancellation instead of reopening the date', () => {
+    expect(nextScheduleAction(new Date('2026-07-23T08:00:00Z'), 'cancelled')).toEqual({
       kind: 'open',
       atIso: '2026-07-28T07:00:00.000Z',
     });

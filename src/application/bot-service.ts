@@ -1,7 +1,7 @@
 import type { Clock } from '../ports/clock';
 import type { RandomSource } from '../ports/random';
 import type { FootballStore, FootballTransaction, UpdateExecution } from '../ports/store';
-import type { PlayerProfile, Session, TeamMember } from '../domain/model';
+import type { Participant, PlayerProfile, Session, TeamMember } from '../domain/model';
 import { changeParty, type RegistrationChange } from '../domain/registration';
 import { formTeams } from '../domain/teams';
 import { awardsForWin, buildLeaderboard, lastReversibleWin, type LeaderboardRow } from '../domain/scoring';
@@ -144,6 +144,41 @@ export class BotService {
     });
   }
 
+  cancelCurrentSession(updateId: string, actorUserId: string): Promise<UpdateExecution<{ sessionId: string }>> {
+    const now = this.clock.now();
+    const nowIso = now.toISOString();
+    const sessionId = sessionIdForCurrentCycle(now);
+    return this.store.transactUpdate(updateId, nowIso, async (tx) => {
+      this.requireAdmin(actorUserId);
+      if (await tx.getSession(sessionId)) await tx.cancelSession(sessionId);
+      await tx.saveSession(cancelledSession(sessionId));
+      await tx.enqueue(this.newId(), { kind: 'session_cancelled', sessionId }, nowIso);
+      return { sessionId };
+    });
+  }
+
+  latestFinishedParticipants(): Promise<{ sessionId: string; participants: Participant[] }> {
+    return this.store.transact((tx) => this.latestFinishedParticipantsIn(tx));
+  }
+
+  removeAbsentParticipant(
+    updateId: string,
+    actorUserId: string,
+    sessionId: string,
+    participantId: string,
+  ): Promise<UpdateExecution<void>> {
+    const nowIso = this.clock.now().toISOString();
+    return this.store.transactUpdate(updateId, nowIso, async (tx) => {
+      this.requireAdmin(actorUserId);
+      const latest = await this.latestFinishedParticipantsIn(tx);
+      if (latest.sessionId !== sessionId) throw new NotFoundError('finished session not found');
+      if (!latest.participants.some((participant) => participant.participantId === participantId)) {
+        throw new NotFoundError('participant not found');
+      }
+      await tx.removeCompletedParticipant(sessionId, participantId);
+    });
+  }
+
   async getPartySize(telegramUserId: string): Promise<0 | 1 | 2 | 3> {
     const sessionId = sessionIdForCurrentCycle(this.clock.now());
     const count = await this.store.transact(async (tx) => (await tx.listParticipants(sessionId))
@@ -208,6 +243,16 @@ export class BotService {
     if (!session) throw new InvalidStateError('session does not exist');
     return session;
   }
+
+  private async latestFinishedParticipantsIn(
+    tx: FootballTransaction,
+  ): Promise<{ sessionId: string; participants: Participant[] }> {
+    const sessionId = [...await tx.listCompletedSessionIds()].sort().at(-1);
+    if (!sessionId) throw new NotFoundError('finished session not found');
+    const session = await tx.getSession(sessionId);
+    if (!session || session.status !== 'finished') throw new NotFoundError('finished session not found');
+    return { sessionId, participants: await tx.listParticipants(sessionId) };
+  }
 }
 
 export async function closeSession(
@@ -230,6 +275,10 @@ export async function closeSession(
 
 function openSession(sessionId: string): Session {
   return { sessionId, status: 'registration_open', nextQueuePosition: 1n, nextWinOrdinal: 1n };
+}
+
+function cancelledSession(sessionId: string): Session {
+  return { sessionId, status: 'cancelled', nextQueuePosition: 1n, nextWinOrdinal: 1n };
 }
 
 async function completedLeaderboard(tx: FootballTransaction): Promise<LeaderboardRow[]> {
