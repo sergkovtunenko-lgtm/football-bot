@@ -296,35 +296,42 @@ describeYdb(suiteName, () => {
       .toEqual(['cancel-other-effect']);
   });
 
-  it('removes one completed participant without removing guests, other awards, or win events', async () => {
+  it('removes a completed guest without removing their owner, other players, awards, or win events', async () => {
     const target = session('attendance-target', 'finished');
-    const player = participants(target.sessionId, 1)[0]!;
+    const owner = participants(target.sessionId, 1)[0]!;
     const guest: Participant = {
       participantId: 'guest', sessionId: target.sessionId, ownerUserId: '1', displayName: 'Guest', kind: 'guest', guestNumber: 1,
       queuePosition: 2n, rosterStatus: 'active',
+    };
+    const otherPlayer: Participant = {
+      participantId: 'other-player', sessionId: target.sessionId, ownerUserId: '2', telegramUserId: '2', displayName: 'Other player',
+      kind: 'player', queuePosition: 3n, rosterStatus: 'active',
     };
     const event = {
       sessionId: target.sessionId, ordinal: 1n, teamNumber: 1 as const, adminUserId: 'admin', createdAtIso: '2026-07-21T08:00:00.000Z',
     };
     await store.transact(async (tx) => {
       await tx.saveSession(target);
-      await tx.replaceParticipants(target.sessionId, [player, guest]);
+      await tx.replaceParticipants(target.sessionId, [owner, guest, otherPlayer]);
       await tx.replaceTeams(target.sessionId, [{ sessionId: target.sessionId, teamNumber: 1 }], [
-        { ...player, teamNumber: 1, role: 'starter' }, { ...guest, teamNumber: 1, role: 'starter' },
+        { ...owner, teamNumber: 1, role: 'starter' }, { ...guest, teamNumber: 1, role: 'starter' },
+        { ...otherPlayer, teamNumber: 1, role: 'starter' },
       ]);
       await tx.appendWin(event, [
         { sessionId: target.sessionId, winOrdinal: 1n, telegramUserId: '1', displayName: 'Player 1' },
-        { sessionId: target.sessionId, winOrdinal: 1n, telegramUserId: 'owner-award', displayName: 'Owner' },
+        { sessionId: target.sessionId, winOrdinal: 1n, telegramUserId: '2', displayName: 'Other player' },
       ]);
-      await tx.removeCompletedParticipant(target.sessionId, player.participantId);
+      await tx.removeCompletedParticipant(target.sessionId, guest.participantId);
     });
 
-    expect(await store.transact((tx) => tx.listParticipants(target.sessionId))).toEqual([guest]);
+    expect(await store.transact((tx) => tx.listParticipants(target.sessionId))).toEqual([owner, otherPlayer]);
     expect(await store.transact((tx) => tx.listTeamMembers(target.sessionId))).toEqual([
-      { ...guest, teamNumber: 1, role: 'starter' },
+      { ...owner, teamNumber: 1, role: 'starter' },
+      { ...otherPlayer, teamNumber: 1, role: 'starter' },
     ]);
     expect(await store.transact((tx) => tx.listWinAwards(target.sessionId))).toEqual([
-      { sessionId: target.sessionId, winOrdinal: 1n, telegramUserId: 'owner-award', displayName: 'Owner' },
+      { sessionId: target.sessionId, winOrdinal: 1n, telegramUserId: '1', displayName: 'Player 1' },
+      { sessionId: target.sessionId, winOrdinal: 1n, telegramUserId: '2', displayName: 'Other player' },
     ]);
     expect(await store.transact((tx) => tx.listWinEvents(target.sessionId))).toEqual([event]);
   });
