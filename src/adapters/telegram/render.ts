@@ -151,9 +151,9 @@ export function renderCancellationConfirmation(sessionId: string): string {
   return `⚠️ Вы уверены, что хотите отменить сбор ${sessionId}?`;
 }
 
-export function cancellationConfirmationKeyboard(): InlineKeyboard {
+export function cancellationConfirmationKeyboard(sessionId: string): InlineKeyboard {
   return { inline_keyboard: [[
-    { text: '⚠️ Да, отменить сбор', callback_data: 'v1:c:confirm' },
+    { text: '⚠️ Да, отменить сбор', callback_data: `v1:c:${sessionId}` },
   ]] };
 }
 

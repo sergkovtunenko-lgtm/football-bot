@@ -155,10 +155,11 @@ export class UpdateRouter {
         await this.showCommandFinishConfirmation(message.chatId);
         break;
       case '/cancel':
+        const status = await this.service.status();
         await this.telegram.sendMessage(
           message.chatId,
-          renderCancellationConfirmation((await this.service.status()).sessionId),
-          cancellationConfirmationKeyboard(),
+          renderCancellationConfirmation(status.sessionId),
+          cancellationConfirmationKeyboard(status.sessionId),
         );
         break;
       case '/absent':
@@ -185,6 +186,7 @@ export class UpdateRouter {
         const data = callback.data;
         const registration = registrationCallback(data);
         const team = winCallback(data);
+        const cancellation = cancellationCallback(data);
         const absence = absenceCallback(data);
         const isScoreAction = team !== undefined || data === 'v1:w:undo'
           || data === 'v1:w:finish' || data === 'v1:w:confirm_finish';
@@ -202,6 +204,12 @@ export class UpdateRouter {
           const status = await this.service.status();
           const session = await this.store.transact((tx) => tx.getSession(status.sessionId));
           if (session?.scoreMessageId !== message.messageId) {
+            answer = 'Эта кнопка уже неактуальна';
+            showAlert = true;
+          }
+        } else if (cancellation !== undefined) {
+          const status = await this.service.status();
+          if (cancellation.sessionId !== status.sessionId) {
             answer = 'Эта кнопка уже неактуальна';
             showAlert = true;
           }
@@ -223,7 +231,7 @@ export class UpdateRouter {
         } else if (data === 'v1:w:confirm_finish') {
           this.requireAdmin(callback.from.id);
           await this.service.finish(updateId, callback.from.id);
-        } else if (data === 'v1:c:confirm') {
+        } else if (cancellation !== undefined) {
           this.requireAdmin(callback.from.id);
           await this.service.cancelCurrentSession(updateId, callback.from.id);
         } else if (absence?.kind === 'select') {
@@ -395,6 +403,15 @@ function winCallback(data: string | undefined): 1 | 2 | 3 | 4 | undefined {
   if (data === 'v1:w:3') return 3;
   if (data === 'v1:w:4') return 4;
   return undefined;
+}
+
+interface CancellationCallback {
+  sessionId: string;
+}
+
+function cancellationCallback(data: string | undefined): CancellationCallback | undefined {
+  const match = /^v1:c:(\d{4}-\d{2}-\d{2})$/.exec(data ?? '');
+  return match?.[1] === undefined ? undefined : { sessionId: match[1] };
 }
 
 interface AbsenceCallback {

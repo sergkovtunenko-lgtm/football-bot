@@ -274,14 +274,23 @@ describe('UpdateRouter callbacks', () => {
 
   it('confirms cancellation only after an admin callback', async () => {
     const { router, service, telegram } = fixture();
-    await router.handle(callback('v1:c:confirm'));
+    await router.handle(callback('v1:c:2026-07-24'));
     expect(service.cancelCurrentSession).toHaveBeenCalledWith('77', '900');
     expect(telegram.answerCallback).toHaveBeenCalledWith('cq', 'Готово', undefined);
 
     const nonAdmin = fixture();
-    await nonAdmin.router.handle(callback('v1:c:confirm', 7));
+    await nonAdmin.router.handle(callback('v1:c:2026-07-24', 7));
     expect(nonAdmin.service.cancelCurrentSession).not.toHaveBeenCalled();
     expect(nonAdmin.telegram.answerCallback).toHaveBeenCalledWith('cq', 'Только администратор', true);
+  });
+
+  it('rejects a cancellation confirmation from an older weekly session', async () => {
+    const { router, service, telegram } = fixture();
+
+    await router.handle(callback('v1:c:2026-07-17'));
+
+    expect(service.cancelCurrentSession).not.toHaveBeenCalled();
+    expect(telegram.answerCallback).toHaveBeenCalledWith('cq', 'Эта кнопка уже неактуальна', true);
   });
 
   it('opens an absence confirmation for a selected latest-finished participant and removes only on confirmation', async () => {
@@ -354,7 +363,7 @@ describe('UpdateRouter recovery commands and validation', () => {
     await router.handle(cancel);
     expect(service.cancelCurrentSession).not.toHaveBeenCalled();
     expect(telegram.sendMessage).toHaveBeenCalledWith('-1001', expect.stringContaining('отменить'), expect.objectContaining({
-      inline_keyboard: [[expect.objectContaining({ callback_data: 'v1:c:confirm' })]],
+      inline_keyboard: [[expect.objectContaining({ callback_data: 'v1:c:2026-07-24' })]],
     }));
 
     vi.mocked(telegram.sendMessage).mockClear();

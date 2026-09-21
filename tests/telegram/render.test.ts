@@ -173,8 +173,8 @@ describe('Telegram rendering', () => {
 
   it('renders explicit protected cancellation and attendance-correction controls with compact callbacks', () => {
     expect(renderCancellationConfirmation('2026-07-24')).toContain('отменить');
-    expect(cancellationConfirmationKeyboard()).toEqual({ inline_keyboard: [[
-      { text: '⚠️ Да, отменить сбор', callback_data: 'v1:c:confirm' },
+    expect(cancellationConfirmationKeyboard('2026-07-24')).toEqual({ inline_keyboard: [[
+      { text: '⚠️ Да, отменить сбор', callback_data: 'v1:c:2026-07-24' },
     ]] });
 
     const participants = [
@@ -192,7 +192,7 @@ describe('Telegram rendering', () => {
     ]] });
 
     for (const keyboard of [
-      cancellationConfirmationKeyboard(),
+      cancellationConfirmationKeyboard('2026-07-24'),
       absenceSelectionKeyboard('2026-07-17', participants),
       absenceConfirmationKeyboard('2026-07-17', '12345678-1234-1234-1234-123456789012'),
     ]) {
