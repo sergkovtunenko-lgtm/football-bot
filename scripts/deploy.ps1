@@ -8,10 +8,15 @@ Add-Type -AssemblyName System.Net.Http
 $FunctionName = 'friday-football-bot'
 $DatabaseName = 'friday-football-bot-db'
 $ServiceAccountName = 'friday-football-bot-runtime'
-$TriggerName = 'friday-football-bot-every-minute'
+$LegacyTriggerName = 'friday-football-bot-every-minute'
+$TimerDefinitions = @(
+    @{ Name = 'friday-football-bot-open'; Cron = '0 7 ? * TUE *' },
+    @{ Name = 'friday-football-bot-open-fallback'; Cron = '10 7 ? * TUE *' },
+    @{ Name = 'friday-football-bot-close'; Cron = '55 17 ? * FRI *' },
+    @{ Name = 'friday-football-bot-close-fallback'; Cron = '5 18 ? * FRI *' }
+)
 $CloudflareWebhookUrl = 'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram'
 $CloudflareTelegramApiUrl = 'https://friday-football-bot-ingress.football-sergei.workers.dev/telegram-api'
-$CronExpression = '* * * * ? *'
 $TriggerPayload = 'tick'
 $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 . (Join-Path $PSScriptRoot 'deploy-helpers.ps1')
@@ -403,12 +408,19 @@ try {
     $StableMoved = $true
     Invoke-YcQuiet @('serverless', 'function', 'add-access-binding', $FunctionName, '--role', 'functions.functionInvoker', '--service-account-id', $ServiceAccountId) 'Private timer invocation binding'
 
-    $Trigger = Get-YcJsonOrNull @('serverless', 'trigger', 'get', $TriggerName, '--format', 'json') 'Timer trigger lookup'
-    if ($null -eq $Trigger) {
-        Invoke-YcQuiet @('serverless', 'trigger', 'create', 'timer', '--name', $TriggerName, '--cron-expression', $CronExpression, '--payload', $TriggerPayload, '--invoke-function-name', $FunctionName, '--invoke-function-tag', 'stable', '--invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger creation'
+    foreach ($Timer in $TimerDefinitions) {
+        $Trigger = Get-YcJsonOrNull @('serverless', 'trigger', 'get', $Timer.Name, '--format', 'json') 'Timer trigger lookup'
+        if ($null -eq $Trigger) {
+            Invoke-YcQuiet @('serverless', 'trigger', 'create', 'timer', '--name', $Timer.Name, '--cron-expression', $Timer.Cron, '--payload', $TriggerPayload, '--invoke-function-name', $FunctionName, '--invoke-function-tag', 'stable', '--invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger creation'
+        }
+        else {
+            Invoke-YcQuiet @('serverless', 'trigger', 'update', '--id', ([string]$Trigger.id), '--new-cron-expression', $Timer.Cron, '--new-payload', $TriggerPayload, '--new-invoke-function-name', $FunctionName, '--new-invoke-function-tag', 'stable', '--new-invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger convergence'
+        }
     }
-    else {
-        Invoke-YcQuiet @('serverless', 'trigger', 'update', 'timer', '--id', ([string]$Trigger.id), '--new-cron-expression', $CronExpression, '--new-payload', $TriggerPayload, '--new-invoke-function-name', $FunctionName, '--new-invoke-function-tag', 'stable', '--new-invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger convergence'
+
+    $LegacyTrigger = Get-YcJsonOrNull @('serverless', 'trigger', 'get', $LegacyTriggerName, '--format', 'json') 'Legacy timer trigger lookup'
+    if ($null -ne $LegacyTrigger) {
+        Invoke-YcQuiet @('serverless', 'trigger', 'delete', '--id', ([string]$LegacyTrigger.id)) 'Legacy minute timer deletion'
     }
 
     Write-Output "Stable URL: $env:FUNCTION_URL"
