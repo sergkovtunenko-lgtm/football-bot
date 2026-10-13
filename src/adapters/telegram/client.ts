@@ -19,7 +19,7 @@ export class TelegramApiError extends TelegramError {
 export class TelegramClient implements TelegramPort {
   constructor(
     private readonly token: string,
-    private readonly fetcher: Fetcher = globalThis.fetch,
+    private readonly fetcher: Fetcher = (input, init) => globalThis.fetch(input, init),
     private readonly sleep: Sleeper = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     private readonly apiBaseUrl?: string,
     private readonly gatewaySecret?: string,

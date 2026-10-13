@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const deploymentScript = readFileSync(new URL('../../scripts/deploy.ps1', import.meta.url), 'utf8');
+const deploymentScript = readFileSync(resolve('scripts/deploy.ps1'), 'utf8');
 
 describe('deployment timer schedule', () => {
   it('uses four sparse Moscow-schedule timer definitions instead of a minute poll', () => {

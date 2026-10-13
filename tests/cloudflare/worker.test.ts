@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 
-// @ts-expect-error The Cloudflare Worker intentionally ships as native ESM.
 import { createWorker } from '../../cloudflare/worker.mjs';
 
 const SECRET = 'cloudflare_webhook_secret_123';

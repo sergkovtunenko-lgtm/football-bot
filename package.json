@@ -9,6 +9,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "cloudflare:dry-run": "wrangler deploy --dry-run",
+    "cloudflare:bot:dry-run": "wrangler deploy --config wrangler.bot.jsonc --dry-run",
+    "cloudflare:bot:deploy": "wrangler deploy --config wrangler.bot.jsonc --var BOT_ACTIVE:true",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

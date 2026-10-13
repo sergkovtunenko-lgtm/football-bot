@@ -414,7 +414,7 @@ try {
             Invoke-YcQuiet @('serverless', 'trigger', 'create', 'timer', '--name', $Timer.Name, '--cron-expression', $Timer.Cron, '--payload', $TriggerPayload, '--invoke-function-name', $FunctionName, '--invoke-function-tag', 'stable', '--invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger creation'
         }
         else {
-            Invoke-YcQuiet @('serverless', 'trigger', 'update', '--id', ([string]$Trigger.id), '--new-cron-expression', $Timer.Cron, '--new-payload', $TriggerPayload, '--new-invoke-function-name', $FunctionName, '--new-invoke-function-tag', 'stable', '--new-invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger convergence'
+            Invoke-YcQuiet @('serverless', 'trigger', 'update', 'timer', '--id', ([string]$Trigger.id), '--new-cron-expression', $Timer.Cron, '--new-payload', $TriggerPayload, '--new-invoke-function-name', $FunctionName, '--new-invoke-function-tag', 'stable', '--new-invoke-function-service-account-id', $ServiceAccountId) 'Timer trigger convergence'
         }
     }
 
