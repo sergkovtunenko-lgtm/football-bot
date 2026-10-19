@@ -77,10 +77,11 @@ export function renderRegistrationCard(view: RegistrationView): string {
     '<b>📋 РЕГЛАМЕНТ</b>',
     '👥 Записывайтесь кнопками ниже: один, с другом или втроём; если планы изменились — нажмите «Отменить».',
     '🚦 Первые 20 человек играют, остальные ждут в резерве и автоматически поднимаются, когда освобождается место.',
-    '🎲 В пятницу в 20:55 бот закрывает запись и случайным образом формирует команды.',
+    '🔒 В пятницу в 19:00 бот закрывает запись и сообщает сумму с человека.',
+    '🎲 В пятницу в 20:55 бот случайным образом формирует команды.',
     '⏱️ Играем до 5 минут или 2 голов, а 🏆 победа идёт в личную статистику каждого игрока команды.',
     '',
-    `<b>🟢 РЕГИСТРАЦИЯ · ${view.active.length}/${view.maxActive}</b>`,
+    `<b>${view.closed ? '🔒 РЕГИСТРАЦИЯ ЗАКРЫТА' : '🟢 РЕГИСТРАЦИЯ'} · ${view.active.length}/${view.maxActive}</b>`,
     progressBar(view.active.length, view.maxActive),
     '',
     `<b>🔥 ОСНОВА · ${view.active.length}</b>`,
@@ -116,6 +117,19 @@ export function renderTeams(view: TeamsView): string {
 
 export function renderPromotion(displayName: string): string {
   return `🎉 ${escapeHtml(displayName)}, вы перешли из резерва в основной состав.`;
+}
+
+export function renderPaymentNotice(sessionId: string, participantCount: number): string {
+  const title = `🔒 Регистрация на ${russianDate(sessionId)} закрыта.`;
+  if (participantCount === 0) return `${title}\nНет зарегистрированных участников.`;
+  const total = participantCount === 20 ? 13200 : 9950;
+  const share = (total / participantCount).toFixed(2).replace('.', ',');
+  return `${title}\nУчастников: ${participantCount} (без резерва).\n💰 Аренда: ${total} ₽.`
+    + `\nСкидываемся по <b>${share} ₽</b> с человека.`;
+}
+
+export function renderWithdrawalNotice(sessionId: string, displayNames: readonly string[]): string {
+  return `🚫 Из списка на ${russianDate(sessionId)} удалены:\n${names(displayNames.map((displayName) => ({ displayName })))}`;
 }
 
 export function renderScorePanel(view: ScoreView): string {

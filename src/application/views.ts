@@ -6,6 +6,7 @@ export interface RegistrationView {
   active: readonly NamedParticipantView[];
   waitlist: readonly NamedParticipantView[];
   maxActive: 20;
+  closed?: boolean;
 }
 export interface TeamView {
   teamNumber: Team['teamNumber'];
@@ -26,7 +27,7 @@ export interface DailyResultsView {
 export interface StatusView {
   sessionId: string;
   sessionStatus: SessionStatus;
-  nextActionKind: 'open' | 'close';
+  nextActionKind: 'open' | 'close' | 'teams';
   nextActionAtIso: string;
   activeCount: number;
   waitlistCount: number;

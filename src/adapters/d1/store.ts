@@ -58,10 +58,17 @@ export class D1FootballStore implements FootballStore {
     if (limit <= 0) return Promise.resolve([]);
     return this.execute(async (tx) => {
       const effects = await tx.list<EffectRecord>('outbox', undefined, ['pending', 'leased']);
+      // Payment must precede teams even during a retry or another worker's lease.
+      const awaitingPayment = new Set(effects.flatMap(({ effect }) =>
+        effect.kind === 'payment_notice' ? [effect.sessionId] : []));
       const due = effects.filter((effect) => effect.nextAttemptAtIso <= nowIso
-        && (effect.status === 'pending' || !effect.leaseUntilIso || effect.leaseUntilIso <= nowIso))
+        && (effect.status === 'pending' || !effect.leaseUntilIso || effect.leaseUntilIso <= nowIso)
+        && !((effect.effect.kind === 'teams' || effect.effect.kind === 'score_panel')
+          && awaitingPayment.has(effect.effect.sessionId)))
         .sort((a, b) => a.nextAttemptAtIso.localeCompare(b.nextAttemptAtIso)
-          || a.createdAtIso.localeCompare(b.createdAtIso) || a.effectId.localeCompare(b.effectId))
+          || a.createdAtIso.localeCompare(b.createdAtIso)
+          || Number(b.effect.kind === 'payment_notice') - Number(a.effect.kind === 'payment_notice')
+          || a.effectId.localeCompare(b.effectId))
         .slice(0, Math.trunc(limit));
       for (const effect of due) tx.putEffect({ ...effect, status: 'leased', leaseId,
         leaseUntilIso: new Date(new Date(nowIso).getTime() + 30_000).toISOString() });

@@ -3,7 +3,7 @@ import type { RandomSource } from '../ports/random';
 import type { FootballStore } from '../ports/store';
 import type { Session } from '../domain/model';
 import { dueScheduleActions, sessionIdForCurrentCycle } from '../domain/schedule';
-import { closeSession } from './bot-service';
+import { closeRegistration, formSessionTeams } from './bot-service';
 
 export class Scheduler {
   constructor(
@@ -33,8 +33,10 @@ export class Scheduler {
           };
           await tx.saveSession(opened);
           await tx.enqueue(this.newId(), { kind: 'registration_card', sessionId: action.sessionId }, nowIso);
+        } else if (action.kind === 'close') {
+          await closeRegistration(tx, action.sessionId, nowIso, this.newId);
         } else {
-          await closeSession(tx, action.sessionId, nowIso, this.random, this.newId);
+          await formSessionTeams(tx, action.sessionId, nowIso, this.random, this.newId);
         }
         await tx.markScheduledAction(action.key, action.sessionId, action.kind, nowIso);
       }

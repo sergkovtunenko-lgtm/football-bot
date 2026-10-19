@@ -7,6 +7,8 @@ import {
   renderDailyResults,
   renderLeaderboardPages,
   renderPromotion,
+  renderPaymentNotice,
+  renderWithdrawalNotice,
   renderRegistrationCard,
   renderScorePanel,
   renderTeams,
@@ -147,12 +149,13 @@ export class OutboxWorker {
         case 'registration_card': {
           const session = await requireSession(tx, effect.sessionId);
           const view = await registrationView(tx, effect.sessionId);
+          view.closed = session.status !== 'registration_open';
           return {
             chatId: groupChatId,
             sessionId: effect.sessionId,
             messages: [{
               html: renderRegistrationCard(view),
-              keyboard: registrationKeyboard(view.sessionId),
+              keyboard: view.closed ? { inline_keyboard: [] } : registrationKeyboard(view.sessionId),
               ...(session.registrationMessageId === undefined ? {
                 messageSlot: 'registrationMessageId' as const, pinWhenCreated: true,
               } : { existingMessageId: session.registrationMessageId }),
@@ -195,6 +198,10 @@ export class OutboxWorker {
             ...renderLeaderboardPages(leaderboard).map((html) => ({ html })),
           ] };
         }
+        case 'withdrawal_notice':
+          return { chatId: groupChatId, messages: [{ html: renderWithdrawalNotice(effect.sessionId, effect.displayNames) }] };
+        case 'payment_notice':
+          return { chatId: groupChatId, messages: [{ html: renderPaymentNotice(effect.sessionId, effect.participantCount) }] };
         case 'session_cancelled':
           return {
             chatId: groupChatId,

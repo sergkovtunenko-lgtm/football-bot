@@ -30,6 +30,74 @@ beforeEach(async () => {
 afterEach(async () => { await mf?.dispose(); });
 
 describe('D1 persistence contracts', () => {
+  it('delivers payment before teams despite reversed IDs, leases and payment retries', async () => {
+    await store.transact(async (tx) => {
+      await tx.saveSession({ sessionId: '2026-10-16', status: 'registration_open',
+        nextQueuePosition: 7n, nextWinOrdinal: 1n });
+      await tx.replaceParticipants('2026-10-16', Array.from({ length: 6 }, (_, index) => ({
+        participantId: `p-${index}`, sessionId: '2026-10-16', ownerUserId: String(index),
+        telegramUserId: String(index), displayName: `P${index}`, kind: 'player',
+        queuePosition: BigInt(index + 1), rosterStatus: 'active',
+      })));
+    });
+    currentIso = '2026-10-16T18:01:00.000Z';
+    const ids = ['z-card', 'z-payment', 'a-teams', 'b-score'];
+    await new Scheduler(store, clock, { int: () => 0 }, () => ids.shift()!).tick();
+    const [payment] = await store.claimDueEffects(currentIso, 1, 'payment-worker');
+    expect(payment?.effect.kind).toBe('payment_notice');
+    const [card] = await store.claimDueEffects(currentIso, 1, 'other-worker');
+    expect(card?.effect.kind).toBe('registration_card');
+    await store.markEffectSent(card!.effectId, currentIso);
+    expect(await store.claimDueEffects(currentIso, 1, 'blocked-by-lease')).toEqual([]);
+    await store.rescheduleEffect(payment!.effectId, 1, '2026-10-16T18:02:00.000Z', 'temporary failure');
+    expect(await store.claimDueEffects('2026-10-16T18:01:40.000Z', 1, 'blocked-by-retry')).toEqual([]);
+    const [retried] = await store.claimDueEffects('2026-10-16T18:02:00.000Z', 1, 'retry-worker');
+    expect(retried?.effect.kind).toBe('payment_notice');
+    await store.markEffectSent(retried!.effectId, '2026-10-16T18:02:00.000Z');
+    const [teams] = await store.claimDueEffects('2026-10-16T18:02:00.000Z', 1, 'teams-worker');
+    expect(teams?.effect.kind).toBe('teams');
+    const [score] = await store.claimDueEffects('2026-10-16T18:02:00.000Z', 1, 'score-worker');
+    expect(score?.effect.kind).toBe('score_panel');
+  }, 20_000);
+
+  it('persists separate cutoff/payment and team stages within the Free query budget', async () => {
+    await store.transact(async (tx) => {
+      await tx.saveSettings({ groupChatId: '-1001' });
+      await tx.saveSession({ sessionId: '2026-10-16', status: 'registration_open', nextQueuePosition: 22n,
+        nextWinOrdinal: 1n, registrationMessageId: '99' });
+      await tx.replaceParticipants('2026-10-16', Array.from({ length: 21 }, (_, index) => ({
+        participantId: `p-${index}`, sessionId: '2026-10-16', ownerUserId: String(index),
+        telegramUserId: String(index), displayName: `P${index}`, kind: 'player', queuePosition: BigInt(index + 1),
+        rosterStatus: index < 20 ? 'active' : 'waitlist',
+      })));
+    });
+    let queries = 0;
+    const measured: FootballDatabase = { prepare: (sql) => { queries++; return db.prepare(sql); },
+      batch: (statements) => db.batch(statements), exec: (sql) => db.exec(sql) };
+    const observed = new D1FootballStore(measured);
+    const scheduler = new Scheduler(observed, clock, { int: () => 0 }, newId);
+    const messages: string[] = [];
+    const outbox = new OutboxWorker(observed, {
+      sendMessage: async (_chat, html) => { messages.push(html); return { messageId: '100' }; },
+      editMessage: async () => {}, answerCallback: async () => {}, pinMessage: async () => {},
+    }, clock, newId);
+    currentIso = '2026-10-16T16:00:00.000Z';
+    await scheduler.tick(); await outbox.flush(1);
+    expect(queries).toBeLessThanOrEqual(50);
+    expect((await store.transact((tx) => tx.getSession('2026-10-16')))?.status).toBe('registration_closed');
+    expect(await store.transact((tx) => tx.listTeams('2026-10-16'))).toHaveLength(0);
+    await outbox.flush(1);
+    expect(messages.some((message) => message.includes('660,00'))).toBe(true);
+    currentIso = '2026-10-16T17:55:00.000Z'; queries = 0;
+    await scheduler.tick(); await outbox.flush(1);
+    expect(queries).toBeLessThanOrEqual(50);
+    expect(await store.transact((tx) => tx.listTeams('2026-10-16'))).toHaveLength(4);
+    expect(await store.transact((tx) => tx.listTeamMembers('2026-10-16'))).toHaveLength(20);
+    await scheduler.tick();
+    const paymentEffects = await db.prepare("SELECT COUNT(*) AS count FROM bot_records WHERE kind='outbox' AND json_extract(payload,'$.effect.kind')='payment_notice'").first<{count: number}>();
+    expect(paymentEffects?.count).toBe(1);
+  }, 20_000);
+
   it.each(['finish', 'win', 'cancel'] as const)('delivers %s with accumulated history within the Free query budget', async (action) => {
     currentIso = '2026-10-16T18:00:00.000Z';
     const members = (sessionId: string): TeamMember[] => Array.from({ length: 7 }, (_, index) => ({

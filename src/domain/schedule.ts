@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon';
 import type { SessionStatus } from './model';
 
-export type ScheduleActionKind = 'open' | 'close';
+export type ScheduleActionKind = 'open' | 'close' | 'teams';
 
 export interface ScheduleAction {
   key: string;
@@ -33,9 +33,19 @@ export function sessionIdForCurrentCycle(now: Date): string {
 export function dueScheduleActions(input: ScheduleInput): ScheduleAction[] {
   const local = DateTime.fromJSDate(input.now, { zone: ZONE });
   const sessionId = sessionIdForCurrentCycle(input.now);
-  const action = actionDueNow(local, sessionId, input.sessionStatus);
+  const actions: ScheduleAction[] = [];
+  if (input.sessionStatus === 'registration_open' && isFridayCloseDue(local)) {
+    actions.push(action(sessionId, 'close'));
+  }
+  if (['registration_open', 'registration_closed'].includes(input.sessionStatus ?? '')
+    && local.weekday === FRIDAY && atOrAfter(local, 20, 55)) {
+    actions.push(action(sessionId, 'teams'));
+  }
+  if ((!input.sessionStatus || input.sessionStatus === 'scheduled') && isRegistrationWindow(local)) {
+    actions.push(action(sessionId, 'open'));
+  }
 
-  return action && !input.completedActionKeys.has(action.key) ? [action] : [];
+  return actions.filter((candidate) => !input.completedActionKeys.has(candidate.key));
 }
 
 export function nextScheduleAction(now: Date, status: SessionStatus): NextScheduleAction {
@@ -43,23 +53,14 @@ export function nextScheduleAction(now: Date, status: SessionStatus): NextSchedu
 
   if (status === 'registration_open') {
     const close = nextFridayClose(local);
-    if (close > local) return { kind: 'close', atIso: toUtcIso(close) };
+    return { kind: 'close', atIso: toUtcIso(close) };
+  }
+  if (status === 'registration_closed') {
+    const teams = nextFridayClose(local).set({ hour: 20, minute: 55 });
+    return { kind: 'teams', atIso: toUtcIso(teams) };
   }
 
   return { kind: 'open', atIso: toUtcIso(nextTuesdayAtTen(local)) };
-}
-
-function actionDueNow(local: DateTime, sessionId: string, status?: SessionStatus): ScheduleAction | undefined {
-  if (status === 'registration_open') {
-    if (isFridayCloseDue(local)) return action(sessionId, 'close');
-    return undefined;
-  }
-
-  if ((!status || status === 'scheduled') && isRegistrationWindow(local)) {
-    return action(sessionId, 'open');
-  }
-
-  return undefined;
 }
 
 function action(sessionId: string, kind: ScheduleActionKind): ScheduleAction {
@@ -69,11 +70,11 @@ function action(sessionId: string, kind: ScheduleActionKind): ScheduleAction {
 function isRegistrationWindow(local: DateTime): boolean {
   return local.weekday >= TUESDAY && local.weekday <= FRIDAY
     && atOrAfter(local, 10, 0)
-    && !(local.weekday === FRIDAY && atOrAfter(local, 20, 55));
+    && !isFridayCloseDue(local);
 }
 
 function isFridayCloseDue(local: DateTime): boolean {
-  return local.weekday === FRIDAY && atOrAfter(local, 20, 55);
+  return local.weekday === FRIDAY && atOrAfter(local, 19, 0);
 }
 
 function atOrAfter(local: DateTime, hour: number, minute: number): boolean {
@@ -82,7 +83,7 @@ function atOrAfter(local: DateTime, hour: number, minute: number): boolean {
 
 function nextFridayClose(local: DateTime): DateTime {
   const daysUntilFriday = (FRIDAY - local.weekday + 7) % 7;
-  return at(local.plus({ days: daysUntilFriday }), 20, 55);
+  return at(local.plus({ days: daysUntilFriday }), 19, 0);
 }
 
 function nextTuesdayAtTen(local: DateTime): DateTime {

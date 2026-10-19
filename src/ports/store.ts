@@ -7,6 +7,8 @@ export type TelegramEffect =
   | { kind: 'score_panel'; sessionId: string }
   | { kind: 'final_results'; sessionId: string }
   | { kind: 'session_cancelled'; sessionId: string }
+  | { kind: 'payment_notice'; sessionId: string; participantCount: number }
+  | { kind: 'withdrawal_notice'; sessionId: string; displayNames: string[] }
   | { kind: 'admin_error'; correlationId: string; summary: string };
 export type AdminErrorEffect = Extract<TelegramEffect, { kind: 'admin_error' }>;
 
