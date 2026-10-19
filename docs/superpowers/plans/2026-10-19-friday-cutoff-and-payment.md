@@ -50,5 +50,9 @@
 - [x] Back up all current D1 records privately and record counts/hash; verify rollback and cancellation isolation against local D1.
 - [x] Cancel exactly 2026-10-16, verify no other logical records changed and no session-local registrations/teams/wins remain.
 - [x] Obtain one fresh whole-change code review; address important findings with failing regression tests first.
-- [ ] Run full suite/typecheck/build/dry-run, commit and push the production branch, deploy Workers.
-- [ ] Verify live health, cron execution, queue/outbox state and production version without fake Telegram posts; report what was not exercised live.
+- [x] Run full suite/typecheck/build/dry-run, commit and push the production branch, deploy Workers.
+- [x] Verify live health, cron execution, queue/outbox state and production version without fake Telegram posts; report what was not exercised live.
+
+## Release evidence
+
+Completed 2026-10-20 Moscow. Code commit `f4ebe143`, Worker version `dc18e1c6-a42e-479e-9733-e7d5f59783e9`; 378 passed / 14 legacy YDB skipped, typecheck/build/dry-run successful. Scoped correction preserved all 1371 unrelated records. Production health ready/active, outbox empty, live cron `ok`, 0 exceptions, CPU 4 ms. See [release report](../../friday-cutoff-release-2026-10-20.md) for decisions, deferred status-text issue, and live-testing limitations.
