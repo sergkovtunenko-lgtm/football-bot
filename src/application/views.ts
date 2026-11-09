@@ -7,6 +7,7 @@ export interface RegistrationView {
   waitlist: readonly NamedParticipantView[];
   maxActive: 20;
   closed?: boolean;
+  cancelled?: boolean;
 }
 export interface TeamView {
   teamNumber: Team['teamNumber'];

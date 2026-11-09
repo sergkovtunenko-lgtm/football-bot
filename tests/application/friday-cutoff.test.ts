@@ -53,7 +53,7 @@ describe('Friday registration cutoff and payment', () => {
     expect(await app.store.transact((tx) => tx.listTeams(SESSION))).toEqual([]);
     await app.drain();
     expect(app.sent).toHaveLength(1);
-    expect(app.sent[0]!.html).toContain('663,33');
+    expect(app.sent[0]!.html).toContain('650,00');
     expect(app.edited.at(-1)?.keyboard).toEqual({ inline_keyboard: [] });
     expect(app.edited.at(-1)?.html).toContain('ЗАКРЫТА');
   });
@@ -78,7 +78,7 @@ describe('Friday registration cutoff and payment', () => {
     expect(await app.store.transact((tx) => tx.listTeamMembers(SESSION))).toHaveLength(19);
     expect(app.store.pendingEffects().filter((effect) => effect.effect.kind === 'teams')).toHaveLength(1);
     await app.drain();
-    expect(app.sent.filter((message) => message.html.includes('523,68'))).toHaveLength(1);
+    expect(app.sent.filter((message) => message.html.includes('513,16'))).toHaveLength(1);
   });
 
   it('catches up both stages in order after a delayed timer without duplicate charges', async () => {
@@ -88,35 +88,53 @@ describe('Friday registration cutoff and payment', () => {
     expect((await app.service.status()).sessionStatus).toBe('playing');
     expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'payment_notice')).toHaveLength(1);
     await app.drain();
-    expect(app.sent.findIndex((message) => message.html.includes('660,00')))
+    expect(app.sent.findIndex((message) => message.html.includes('662,50')))
       .toBeLessThan(app.sent.findIndex((message) => message.html.includes('Составы команд')));
   });
 
   it.each([
-    [10, '9950', '995,00'], [15, '9950', '663,33'], [19, '9950', '523,68'], [20, '13200', '660,00'],
-    [21, '13200', '660,00'],
-  ])('calculates payment for %i registrations without charging the waitlist', async (count, total, share) => {
+    [11, '6750', '613,64', '1 час'], [12, '6750', '562,50', '1 час'],
+    [13, '9750', '750,00', '1,5 часа'], [14, '9750', '696,43', '1,5 часа'],
+    [15, '9750', '650,00', '1,5 часа'], [19, '9750', '513,16', '1,5 часа'],
+    [20, '13250', '662,50', '2 часа'], [21, '13250', '662,50', '2 часа'],
+  ])('calculates payment for %i registrations without charging the waitlist', async (count, total, share, duration) => {
     const app = await fixture(count);
     app.at('2026-10-23T16:00:00.000Z'); await app.scheduler.tick(); await app.drain();
     const payment = app.sent[0]!.html.replace(/[\s\u00a0\u202f]/g, '');
     expect(payment).toContain(total);
     expect(payment).toContain(share);
+    expect(app.sent[0]!.html).toContain(duration);
     expect(app.sent).toHaveLength(1);
   });
 
   it('counts each guest as a paying participant', async () => {
-    const app = await fixture(0);
-    await app.service.setParty('with-guests', { telegramUserId: '1', displayName: 'Owner' }, 3);
+    const app = await fixture(9);
+    await app.service.setParty('with-guests', { telegramUserId: '10', displayName: 'Owner' }, 2);
     await app.drain(); app.sent.length = 0;
     app.at('2026-10-23T16:00:00.000Z'); await app.scheduler.tick(); await app.drain();
-    expect(app.sent[0]?.html).toContain('3316,67');
+    expect(app.sent[0]?.html).toContain('613,64');
   });
 
-  it('does not divide by zero or demand money when nobody registered', async () => {
-    const app = await fixture(0);
-    app.at('2026-10-23T16:00:00.000Z'); await app.scheduler.tick(); await app.drain();
-    expect(app.sent[0]?.html).toContain('Нет зарегистрированных');
-    expect(app.sent[0]?.html).not.toMatch(/NaN|Infinity|9950|скидываемся/i);
+  it.each([
+    [0, '2026-10-23T16:00:00.000Z'],
+    [10, '2026-10-23T16:00:00.000Z'],
+    [10, '2026-10-23T18:01:00.000Z'],
+  ])('cancels with %i players at %s without payment or teams', async (count, cutoff) => {
+    const app = await fixture(count);
+    app.at(cutoff);
+    await Promise.all([app.scheduler.tick(), app.scheduler.tick()]);
+    expect((await app.service.status()).sessionStatus).toBe('cancelled');
+    app.at('2026-10-23T18:02:00.000Z'); await app.scheduler.tick(); await app.drain();
+    expect(app.sent).toHaveLength(1);
+    expect(app.sent[0]?.html).toContain('не состоится');
+    expect(app.sent[0]?.html).not.toMatch(/NaN|Infinity|₽|скидываемся/i);
+    expect(app.edited.at(-1)?.keyboard).toEqual({ inline_keyboard: [] });
+    expect(app.edited.at(-1)?.html).toContain('СБОР ОТМЕНЁН');
+    expect(await app.store.transact((tx) => tx.listTeams(SESSION))).toEqual([]);
+    expect((await app.store.transact((tx) => tx.listCompletedSessionIds())).has(SESSION)).toBe(false);
+    await expect(app.service.finish('finish-cancelled', '900')).rejects.toBeInstanceOf(InvalidStateError);
+    app.at('2026-10-27T07:00:00.000Z'); await app.scheduler.tick();
+    expect(await app.service.status()).toMatchObject({ sessionId: '2026-10-30', sessionStatus: 'registration_open' });
   });
 
   it('does not publish payment or teams for a cancelled session', async () => {
@@ -137,7 +155,8 @@ describe('Visible participant removals', () => {
     await app.drain();
     expect(app.sent).toHaveLength(1);
     expect(app.sent[0]?.html).toContain('P1');
-    expect(app.sent[0]?.html).toContain('Из списка');
+    expect(app.sent[0]?.html).toContain('Состав обновился: P1 в этот раз пропускает игру.');
+    expect(app.sent[0]?.html).not.toMatch(/удал|исключ|до встречи/i);
     expect((await app.service.registrationView()).active).toEqual([]);
   });
 
@@ -161,7 +180,7 @@ describe('Visible participant removals', () => {
   });
 
   it('announces exactly the absent participant removed by the administrator', async () => {
-    const app = await fixture(7);
+    const app = await fixture(11);
     await app.service.closeNow('close', '900');
     await app.service.finish('finish', '900'); await app.drain(); app.sent.length = 0;
     const participant = (await app.service.latestFinishedParticipants()).participants[0]!;
@@ -169,6 +188,6 @@ describe('Visible participant removals', () => {
     await app.drain();
     expect(app.sent).toHaveLength(1);
     expect(app.sent[0]?.html).toContain(participant.displayName);
-    expect((await app.service.latestFinishedParticipants()).participants).toHaveLength(6);
+    expect((await app.service.latestFinishedParticipants()).participants).toHaveLength(10);
   });
 });

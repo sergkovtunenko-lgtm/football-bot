@@ -53,7 +53,8 @@ describe('Telegram rendering', () => {
     const text = renderRegistrationCard(view);
     expect(text).toContain('👥 Записывайтесь кнопками ниже');
     expect(text).toContain('🚦 Первые 20 человек играют');
-    expect(text).toContain('🎲 В пятницу в 20:55');
+    expect(text).toContain('хотя бы 11 игроков');
+    expect(text).toContain('Если игра состоится, в 20:55');
     expect(text).toContain('🏆 победа идёт в личную статистику');
   });
 

@@ -37,13 +37,15 @@ it('does not enqueue reminder effects after opening', async () => {
   expect(app.store.pendingEffects()[0]?.effect.kind).toBe('registration_card');
 });
 
-it('catches up Friday close after 20:55 Moscow', async () => {
+it('catches up cancellation after 20:55 Moscow when no players registered', async () => {
   const app = fixture('2026-07-21T08:00:00.000Z');
   await app.scheduler.tick();
   app.advanceTo('2026-07-24T18:30:00.000Z');
   await app.scheduler.tick();
   expect(app.store.scheduledActionKeys()).toContain('2026-07-24:close');
-  expect(app.store.pendingEffects().some((entry) => entry.effect.kind === 'teams')).toBe(true);
+  expect((await app.store.transact((tx) => tx.getSession('2026-07-24')))?.status).toBe('cancelled');
+  expect(app.store.pendingEffects().some((entry) => entry.effect.kind === 'teams')).toBe(false);
+  expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'session_cancelled')).toHaveLength(1);
 });
 
 it('rolls back action and effect when a transaction fails', async () => {

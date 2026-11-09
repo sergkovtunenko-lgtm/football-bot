@@ -24,6 +24,7 @@ export class Scheduler {
         : { now, completedActionKeys: new Set() });
       for (const action of actions) {
         if (await tx.hasScheduledAction(action.key)) continue;
+        let cancelled = false;
         if (action.kind === 'open') {
           const opened: Session = {
             sessionId: action.sessionId,
@@ -34,11 +35,12 @@ export class Scheduler {
           await tx.saveSession(opened);
           await tx.enqueue(this.newId(), { kind: 'registration_card', sessionId: action.sessionId }, nowIso);
         } else if (action.kind === 'close') {
-          await closeRegistration(tx, action.sessionId, nowIso, this.newId);
+          cancelled = !await closeRegistration(tx, action.sessionId, nowIso, this.newId);
         } else {
           await formSessionTeams(tx, action.sessionId, nowIso, this.random, this.newId);
         }
         await tx.markScheduledAction(action.key, action.sessionId, action.kind, nowIso);
+        if (cancelled) break;
       }
     });
   }

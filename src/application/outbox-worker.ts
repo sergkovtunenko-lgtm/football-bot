@@ -8,6 +8,7 @@ import {
   renderLeaderboardPages,
   renderPromotion,
   renderPaymentNotice,
+  renderLowAttendanceNotice,
   renderWithdrawalNotice,
   renderRegistrationCard,
   renderScorePanel,
@@ -150,6 +151,7 @@ export class OutboxWorker {
           const session = await requireSession(tx, effect.sessionId);
           const view = await registrationView(tx, effect.sessionId);
           view.closed = session.status !== 'registration_open';
+          view.cancelled = session.status === 'cancelled';
           return {
             chatId: groupChatId,
             sessionId: effect.sessionId,
@@ -205,7 +207,9 @@ export class OutboxWorker {
         case 'session_cancelled':
           return {
             chatId: groupChatId,
-            messages: [{ html: `⚠️ Сбор ${effect.sessionId} отменён.` }],
+            messages: [{ html: effect.participantCount === undefined
+              ? `⚠️ Сбор ${effect.sessionId} отменён.`
+              : renderLowAttendanceNotice(effect.sessionId, effect.participantCount) }],
           };
         case 'admin_error':
           return {

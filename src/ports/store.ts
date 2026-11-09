@@ -6,7 +6,7 @@ export type TelegramEffect =
   | { kind: 'teams'; sessionId: string }
   | { kind: 'score_panel'; sessionId: string }
   | { kind: 'final_results'; sessionId: string }
-  | { kind: 'session_cancelled'; sessionId: string }
+  | { kind: 'session_cancelled'; sessionId: string; participantCount?: number }
   | { kind: 'payment_notice'; sessionId: string; participantCount: number }
   | { kind: 'withdrawal_notice'; sessionId: string; displayNames: string[] }
   | { kind: 'admin_error'; correlationId: string; summary: string };

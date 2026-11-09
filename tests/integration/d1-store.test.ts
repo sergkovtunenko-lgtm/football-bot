@@ -33,8 +33,8 @@ describe('D1 persistence contracts', () => {
   it('delivers payment before teams despite reversed IDs, leases and payment retries', async () => {
     await store.transact(async (tx) => {
       await tx.saveSession({ sessionId: '2026-10-16', status: 'registration_open',
-        nextQueuePosition: 7n, nextWinOrdinal: 1n });
-      await tx.replaceParticipants('2026-10-16', Array.from({ length: 6 }, (_, index) => ({
+        nextQueuePosition: 12n, nextWinOrdinal: 1n });
+      await tx.replaceParticipants('2026-10-16', Array.from({ length: 11 }, (_, index) => ({
         participantId: `p-${index}`, sessionId: '2026-10-16', ownerUserId: String(index),
         telegramUserId: String(index), displayName: `P${index}`, kind: 'player',
         queuePosition: BigInt(index + 1), rosterStatus: 'active',
@@ -60,12 +60,12 @@ describe('D1 persistence contracts', () => {
     expect(score?.effect.kind).toBe('score_panel');
   }, 20_000);
 
-  it('persists separate cutoff/payment and team stages within the Free query budget', async () => {
+  it.each([10, 21])('keeps the Friday cutoff within the Free query budget with %i registrations', async (registered) => {
     await store.transact(async (tx) => {
       await tx.saveSettings({ groupChatId: '-1001' });
-      await tx.saveSession({ sessionId: '2026-10-16', status: 'registration_open', nextQueuePosition: 22n,
+      await tx.saveSession({ sessionId: '2026-10-16', status: 'registration_open', nextQueuePosition: BigInt(registered + 1),
         nextWinOrdinal: 1n, registrationMessageId: '99' });
-      await tx.replaceParticipants('2026-10-16', Array.from({ length: 21 }, (_, index) => ({
+      await tx.replaceParticipants('2026-10-16', Array.from({ length: registered }, (_, index) => ({
         participantId: `p-${index}`, sessionId: '2026-10-16', ownerUserId: String(index),
         telegramUserId: String(index), displayName: `P${index}`, kind: 'player', queuePosition: BigInt(index + 1),
         rosterStatus: index < 20 ? 'active' : 'waitlist',
@@ -81,13 +81,23 @@ describe('D1 persistence contracts', () => {
       sendMessage: async (_chat, html) => { messages.push(html); return { messageId: '100' }; },
       editMessage: async () => {}, answerCallback: async () => {}, pinMessage: async () => {},
     }, clock, newId);
-    currentIso = '2026-10-16T16:00:00.000Z';
+    currentIso = registered === 10 ? '2026-10-16T18:01:00.000Z' : '2026-10-16T16:00:00.000Z';
     await scheduler.tick(); await outbox.flush(1);
     expect(queries).toBeLessThanOrEqual(50);
-    expect((await store.transact((tx) => tx.getSession('2026-10-16')))?.status).toBe('registration_closed');
+    expect((await store.transact((tx) => tx.getSession('2026-10-16')))?.status)
+      .toBe(registered === 10 ? 'cancelled' : 'registration_closed');
     expect(await store.transact((tx) => tx.listTeams('2026-10-16'))).toHaveLength(0);
     await outbox.flush(1);
-    expect(messages.some((message) => message.includes('660,00'))).toBe(true);
+    if (registered === 10) {
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain('Игра не состоится');
+      expect(messages[0]).not.toContain('₽');
+      expect((await store.transact((tx) => tx.listCompletedSessionIds())).has('2026-10-16')).toBe(false);
+      await scheduler.tick();
+      expect((await store.getOperationalStatus()).pendingEffectCount).toBe(0);
+      return;
+    }
+    expect(messages.some((message) => message.includes('662,50'))).toBe(true);
     currentIso = '2026-10-16T17:55:00.000Z'; queries = 0;
     await scheduler.tick(); await outbox.flush(1);
     expect(queries).toBeLessThanOrEqual(50);
@@ -195,14 +205,23 @@ describe('D1 persistence contracts', () => {
   it('preserves incomplete teams and recalculates finished statistics after an absence', async () => {
     const service = new BotService(store, clock, { int: () => 0 }, new Set(['900']), newId);
     await service.setup('setup', '900', '-1001'); await service.openNow('open', '900');
-    for (let n = 1; n <= 7; n++) await service.setParty(`r-${n}`, { telegramUserId: String(n), displayName: `P${n}` }, 1);
+    const players = Array.from({ length: 11 }, (_, index) => ({
+      telegramUserId: String(index + 1), displayName: `P${index + 1}`,
+    }));
+    await store.transact(async (tx) => {
+      for (const player of players) await tx.upsertPlayer(player, currentIso);
+      await tx.replaceParticipants('2026-10-16', players.map((player, index) => ({
+        ...player, participantId: `p-${index}`, sessionId: '2026-10-16', ownerUserId: player.telegramUserId,
+        kind: 'player', queuePosition: BigInt(index + 1), rosterStatus: 'active',
+      })));
+    });
     currentIso = '2026-10-16T17:55:00.000Z';
-    expect((await service.closeNow('close', '900')).value?.teamCount).toBe(2);
+    expect((await service.closeNow('close', '900')).value?.teamCount).toBe(3);
     await service.recordWin('win', '900', 2);
-    expect((await service.finish('finish', '900')).value?.leaderboard).toHaveLength(7);
+    expect((await service.finish('finish', '900')).value?.leaderboard).toHaveLength(11);
     const participants = await store.transact((tx) => tx.listParticipants('2026-10-16'));
     await store.transact((tx) => tx.removeCompletedParticipant('2026-10-16', participants[0]!.participantId));
-    expect(await store.transact((tx) => tx.listParticipants('2026-10-16'))).toHaveLength(6);
+    expect(await store.transact((tx) => tx.listParticipants('2026-10-16'))).toHaveLength(10);
     await service.cancelCurrentSession('cancel', '900');
     expect((await store.transact((tx) => tx.getSession('2026-10-16')))?.status).toBe('cancelled');
     expect(await store.transact((tx) => tx.listWinEvents('2026-10-16'))).toEqual([]);

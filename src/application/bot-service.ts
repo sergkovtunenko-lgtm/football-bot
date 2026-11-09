@@ -4,6 +4,7 @@ import type { FootballStore, FootballTransaction, UpdateExecution } from '../por
 import type { Participant, PlayerProfile, Session, TeamMember } from '../domain/model';
 import { changeParty, type RegistrationChange } from '../domain/registration';
 import { formTeams } from '../domain/teams';
+import { MIN_GAME_PLAYERS } from '../domain/game-terms';
 import { awardsForWin, buildLeaderboard, lastReversibleWin, type LeaderboardRow } from '../domain/scoring';
 import { dueScheduleActions, nextScheduleAction, sessionIdForCurrentCycle } from '../domain/schedule';
 import type { RegistrationView, StatusView } from './views';
@@ -274,7 +275,9 @@ export async function closeSession(
   newId: () => string,
 ): Promise<CloseResult> {
   const session = await tx.getSession(sessionId);
-  if (session?.status === 'registration_open') await closeRegistration(tx, sessionId, nowIso, newId);
+  if (session?.status === 'registration_open' && !await closeRegistration(tx, sessionId, nowIso, newId)) {
+    return { sessionId, teamCount: 0 };
+  }
   const result = await formSessionTeams(tx, sessionId, nowIso, random, newId);
   await tx.markScheduledAction(`${sessionId}:teams`, sessionId, 'teams', nowIso);
   return result;
@@ -285,14 +288,19 @@ export async function closeRegistration(
   sessionId: string,
   nowIso: string,
   newId: () => string,
-): Promise<void> {
+): Promise<boolean> {
   const session = await tx.getSession(sessionId);
   if (!session) throw new InvalidStateError('session does not exist');
   if (session.status !== 'registration_open') throw new InvalidStateError('registration is not open');
   const participantCount = (await tx.listParticipants(sessionId)).filter((p) => p.rosterStatus === 'active').length;
+  if (participantCount < MIN_GAME_PLAYERS) {
+    await cancelForLowAttendance(tx, session, participantCount, nowIso, newId);
+    return false;
+  }
   await tx.saveSession({ ...session, status: 'registration_closed' });
   await tx.enqueue(newId(), { kind: 'registration_card', sessionId }, nowIso);
   await tx.enqueue(newId(), { kind: 'payment_notice', sessionId, participantCount }, nowIso);
+  return true;
 }
 
 export async function formSessionTeams(
@@ -305,12 +313,31 @@ export async function formSessionTeams(
   const session = await tx.getSession(sessionId);
   if (!session || session.status !== 'registration_closed') throw new InvalidStateError('registration is not closed');
   if (await tx.hasScheduledAction(`${sessionId}:teams`)) throw new InvalidStateError('teams already formed');
-  const formation = formTeams(await tx.listParticipants(sessionId), random);
+  const participants = await tx.listParticipants(sessionId);
+  const participantCount = participants.filter((p) => p.rosterStatus === 'active').length;
+  if (participantCount < MIN_GAME_PLAYERS) {
+    await cancelForLowAttendance(tx, session, participantCount, nowIso, newId);
+    return { sessionId, teamCount: 0 };
+  }
+  const formation = formTeams(participants, random);
   await tx.replaceTeams(sessionId, formation.teams, formation.members);
   await tx.saveSession({ ...session, status: formation.teams.length >= 2 ? 'playing' : 'registration_closed' });
   await tx.enqueue(newId(), { kind: 'teams', sessionId }, nowIso);
   if (formation.teams.length >= 2) await tx.enqueue(newId(), { kind: 'score_panel', sessionId }, nowIso);
   return { sessionId, teamCount: formation.teams.length };
+}
+
+async function cancelForLowAttendance(
+  tx: FootballTransaction,
+  session: Session,
+  participantCount: number,
+  nowIso: string,
+  newId: () => string,
+): Promise<void> {
+  // Keep the registration message ID so the bot can close the original card.
+  await tx.saveSession({ ...session, status: 'cancelled' });
+  await tx.enqueue(newId(), { kind: 'registration_card', sessionId: session.sessionId }, nowIso);
+  await tx.enqueue(newId(), { kind: 'session_cancelled', sessionId: session.sessionId, participantCount }, nowIso);
 }
 
 function openSession(sessionId: string): Session {

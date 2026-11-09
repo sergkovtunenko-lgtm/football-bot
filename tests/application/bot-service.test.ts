@@ -27,14 +27,14 @@ describe('BotService', () => {
   it('runs registration, close, wins, undo, and finish exactly once', async () => {
     const app = fixture();
     await open(app);
-    await register(app, 10);
+    await register(app, 11);
     const closed = await app.service.closeNow('close', '900');
-    expect(closed.value?.teamCount).toBe(2);
+    expect(closed.value?.teamCount).toBe(3);
     expect((await app.service.recordWin('win-1', '900', 1)).duplicate).toBe(false);
     expect((await app.service.recordWin('win-1', '900', 1)).duplicate).toBe(true);
     await app.service.undoLastWin('undo', '900');
     const finished = await app.service.finish('finish', '900');
-    expect(finished.value?.leaderboard).toHaveLength(10);
+    expect(finished.value?.leaderboard).toHaveLength(11);
     expect(finished.value?.leaderboard.every((row) => row.wins === 0 && row.evenings === 1)).toBe(true);
   });
 
@@ -43,7 +43,7 @@ describe('BotService', () => {
     if (method !== 'setup') {
       await open(app);
       if (method !== 'close') {
-        await register(app, 10);
+        await register(app, 11);
         await app.service.closeNow('close', '900');
       }
     }
@@ -60,9 +60,9 @@ describe('BotService', () => {
     await expect(app.service.setParty('before', { telegramUserId: '1', displayName: 'P1' }, 1))
       .rejects.toBeInstanceOf(InvalidStateError);
     await open(app);
-    await register(app, 10);
+    await register(app, 11);
     await app.service.closeNow('close', '900');
-    await expect(app.service.setParty('after', { telegramUserId: '11', displayName: 'P11' }, 1))
+    await expect(app.service.setParty('after', { telegramUserId: '12', displayName: 'P12' }, 1))
       .rejects.toBeInstanceOf(InvalidStateError);
   });
 
@@ -76,28 +76,28 @@ describe('BotService', () => {
     expect(app.store.pendingEffects().some((entry) => entry.effect.kind === 'promotion_notice')).toBe(true);
   });
 
-  it('starts play with two incomplete teams when nine players close', async () => {
+  it('starts play with an incomplete third team at the minimum of eleven', async () => {
     const app = fixture();
     await open(app);
-    await register(app, 9);
-    expect((await app.service.closeNow('close', '900')).value?.teamCount).toBe(2);
+    await register(app, 11);
+    expect((await app.service.closeNow('close', '900')).value?.teamCount).toBe(3);
     expect((await app.service.status()).sessionStatus).toBe('playing');
     expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'teams')).toHaveLength(1);
     expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'score_panel')).toHaveLength(1);
   });
 
-  it('persists two teams when ten players close', async () => {
+  it('applies the minimum to a manual close with ten players', async () => {
     const app = fixture();
     await open(app);
     await register(app, 10);
     await app.service.closeNow('close', '900');
-    expect((await app.service.status()).teamCount).toBe(2);
-    expect((await app.service.status()).sessionStatus).toBe('playing');
+    expect(await app.service.status()).toMatchObject({ teamCount: 0, sessionStatus: 'cancelled' });
+    expect(app.store.pendingEffects().some((entry) => ['payment_notice', 'teams', 'score_panel'].includes(entry.effect.kind))).toBe(false);
   });
 
   it('finishes a session without overlapping calls in one store transaction', async () => {
     const app = fixture();
-    await open(app); await register(app, 10); await app.service.closeNow('close', '900');
+    await open(app); await register(app, 11); await app.service.closeNow('close', '900');
     app.store.rejectConcurrentTransactionCalls();
 
     const result = await app.service.finish('finish', '900');
@@ -109,16 +109,16 @@ describe('BotService', () => {
   it('rejects a win for an unknown team', async () => {
     const app = fixture();
     await open(app);
-    await register(app, 10);
+    await register(app, 11);
     await app.service.closeNow('close', '900');
-    await expect(app.service.recordWin('win', '900', 3)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(app.service.recordWin('win', '900', 4)).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('awards players on an incomplete team, but not guests', async () => {
     const app = fixture();
     await open(app);
-    for (let i = 1; i <= 7; i += 1) await app.service.setParty(`r-${i}`, { telegramUserId: String(i), displayName: `P${i}` }, 1);
-    await app.service.setParty('party', { telegramUserId: '8', displayName: 'P8' }, 2);
+    for (let i = 1; i <= 12; i += 1) await app.service.setParty(`r-${i}`, { telegramUserId: String(i), displayName: `P${i}` }, 1);
+    await app.service.setParty('party', { telegramUserId: '13', displayName: 'P13' }, 2);
     await app.service.closeNow('close', '900');
     const members = await app.store.transact((tx) => tx.listTeamMembers('2026-07-24'));
     const incompleteTeam = [...new Set(members.map((member) => member.teamNumber))]
@@ -135,14 +135,14 @@ describe('BotService', () => {
 
     const leaderboard = (await app.service.finish('finish', '900')).value?.leaderboard ?? [];
 
-    expect(leaderboard).toHaveLength(8);
+    expect(leaderboard).toHaveLength(13);
     expect(leaderboard.filter((row) => row.wins === 1).map((row) => row.telegramUserId).sort())
       .toEqual(playerIds.sort());
   });
 
   it('undoes only the highest active ordinal', async () => {
     const app = fixture();
-    await open(app); await register(app, 10); await app.service.closeNow('close', '900');
+    await open(app); await register(app, 11); await app.service.closeNow('close', '900');
     await app.service.recordWin('w1', '900', 1); await app.service.recordWin('w2', '900', 2);
     expect((await app.service.undoLastWin('undo', '900')).value?.reversedOrdinal).toBe(2n);
     const events = await app.store.transact((tx) => tx.listWinEvents('2026-07-24'));
@@ -151,23 +151,23 @@ describe('BotService', () => {
 
   it('finishes idempotently and locks further wins', async () => {
     const app = fixture();
-    await open(app); await register(app, 10); await app.service.closeNow('close', '900');
+    await open(app); await register(app, 11); await app.service.closeNow('close', '900');
     await app.service.finish('finish-1', '900');
-    expect((await app.service.finish('finish-2', '900')).value?.leaderboard).toHaveLength(10);
+    expect((await app.service.finish('finish-2', '900')).value?.leaderboard).toHaveLength(11);
     expect(app.store.pendingEffects().filter((entry) => entry.effect.kind === 'final_results')).toHaveLength(1);
     await expect(app.service.recordWin('win', '900', 1)).rejects.toBeInstanceOf(InvalidStateError);
   });
 
   it('includes winners and zero-win attendees only after their session is completed', async () => {
     const app = fixture();
-    await open(app); await register(app, 10); await app.service.closeNow('close', '900');
+    await open(app); await register(app, 11); await app.service.closeNow('close', '900');
     await app.service.recordWin('win', '900', 1);
     const before = await app.store.transact(async (tx) => ({
       events: await tx.listWinEvents(), awards: await tx.listWinAwards(), completed: await tx.listCompletedSessionIds(),
     }));
     expect(before.completed.size).toBe(0);
     const leaderboard = (await app.service.finish('finish', '900')).value?.leaderboard ?? [];
-    expect(leaderboard).toHaveLength(10);
+    expect(leaderboard).toHaveLength(11);
     expect(leaderboard.every((row) => row.evenings === 1)).toBe(true);
     expect(leaderboard.some((row) => row.wins === 1)).toBe(true);
     expect(leaderboard.some((row) => row.wins === 0)).toBe(true);

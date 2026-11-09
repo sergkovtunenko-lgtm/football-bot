@@ -675,7 +675,10 @@ function parseEffect(json: string): TelegramEffect {
       if (typeof value.sessionId === 'string') return { kind: value.kind, sessionId: value.sessionId };
       break;
     case 'session_cancelled':
-      if (typeof value.sessionId === 'string') return { kind: value.kind, sessionId: value.sessionId };
+      if (typeof value.sessionId === 'string') {
+        return { kind: value.kind, sessionId: value.sessionId,
+          ...(typeof value.participantCount === 'number' ? { participantCount: value.participantCount } : {}) };
+      }
       break;
     case 'promotion_notice':
       if (typeof value.sessionId === 'string' && typeof value.ownerUserId === 'string') {
